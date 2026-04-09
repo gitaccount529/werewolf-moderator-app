@@ -1,0 +1,142 @@
+// ─── Enums ───────────────────────────────────────────────────
+export type GameStatus = 'lobby' | 'night' | 'day' | 'ended';
+export type Team = 'village' | 'werewolf' | 'tanner' | 'vampire' | 'cult' | 'neutral';
+export type RoleSet = 'deluxe' | 'extreme';
+export type GameMode = 'classic' | 'one_night' | 'custom';
+export type ItemType = 'ivory_tower' | 'charm' | 'sandwich' | 'gavel';
+export type DeathCause =
+  | 'werewolf'
+  | 'lynch'
+  | 'hunter'
+  | 'witch'
+  | 'bomber'
+  | 'heartbreak'
+  | 'vampire'
+  | 'chupacabra'
+  | 'dire_wolf'
+  | 'bloody_mary'
+  | 'cult'
+  | 'other';
+
+// ─── Database Row Types ──────────────────────────────────────
+export interface Game {
+  id: number;
+  code: string;
+  name: string;
+  pin_hash: string;
+  status: GameStatus;
+  current_round: number;
+  created_at: string;
+}
+
+export interface Player {
+  id: number;
+  game_id: number;
+  name: string;
+  socket_id: string | null;
+  is_alive: number; // SQLite boolean: 0 or 1
+  death_cause: DeathCause | null;
+  death_round: number | null;
+  seat_order: number;
+  joined_at: string;
+}
+
+export interface Role {
+  id: number;
+  name: string;
+  team: Team;
+  set: RoleSet;
+  night_wake_order: number; // 0 = does not wake
+  is_night_role: number;    // SQLite boolean
+  default_count: number;
+  ability: string;
+  moderator_script: string;
+  moderator_script_tl: string;
+}
+
+export interface GameRole {
+  id: number;
+  game_id: number;
+  role_id: number;
+  count: number;
+}
+
+export interface PlayerRole {
+  id: number;
+  player_id: number;
+  game_id: number;
+  role_id: number;
+}
+
+export interface NightAction {
+  id: number;
+  game_id: number;
+  round: number;
+  role_id: number;
+  actor_player_id: number;
+  target_player_id: number | null;
+  action_type: string;
+  result: string | null;
+  created_at: string;
+}
+
+export interface RoleTemplate {
+  id: number;
+  name: string;
+  player_count: number;
+  roles_json: string; // JSON array of {roleId, roleName, count}
+  created_at: string;
+}
+
+export interface GameLogEntry {
+  id: number;
+  game_id: number;
+  round: number;
+  phase: string;
+  event_type: string;
+  description: string;
+  details_json: string | null;
+  created_at: string;
+}
+
+// ─── API / App Types ─────────────────────────────────────────
+export interface PlayerWithRole extends Player {
+  role_name?: string;
+  role_team?: Team;
+  role_ability?: string;
+}
+
+export interface GameState {
+  game: Game;
+  players: Player[];
+  gameRoles: (GameRole & { role_name: string; role_team: Team })[];
+}
+
+export interface NightStep {
+  role: Role;
+  actors: Player[];
+  order: number;
+  nightOneOnly: boolean;
+}
+
+export interface DeathRecord {
+  playerId: number;
+  playerName: string;
+  cause: DeathCause;
+  roleName?: string;
+}
+
+export interface NightResolution {
+  deaths: DeathRecord[];
+  chainDeaths: DeathRecord[];
+  announcements: string[];
+  banished: number | null;
+  silenced: number | null;
+  gameOver: boolean;
+  winningTeam: string | null;
+  winReason: string | null;
+  pendingHunterKill: boolean;
+  pendingItemAssignment?: ItemType | null;
+  firstDeathPlayerId?: number | null;
+  firstDeathPlayerName?: string | null;
+}

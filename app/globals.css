@@ -1,0 +1,63 @@
+@import "tailwindcss";
+
+@theme {
+  --color-charcoal: #1a1a2e;
+  --color-charcoal-light: #16213e;
+  --color-charcoal-dark: #0f0f23;
+  --color-gold: #c9a227;
+  --color-gold-light: #d4b84a;
+  --color-gold-dark: #a8871e;
+  --color-blood: #8b0000;
+  --color-blood-light: #b22222;
+  --color-forest: #1b4332;
+  --color-forest-light: #2d6a4f;
+  --color-moon: #e8e8e8;
+  --color-moon-dim: #9a9a9a;
+  --color-parchment: #f5f0e8;
+
+  --color-team-village: #c9a227;
+  --color-team-werewolf: #b22222;
+  --color-team-tanner: #8b5e3c;
+  --color-team-vampire: #6a0dad;
+  --color-team-cult: #4a148c;
+  --color-team-neutral: #6b7280;
+
+  --font-display: "Cinzel", serif;
+  --font-body: "Inter", system-ui, sans-serif;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse-gold {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(201, 162, 39, 0.4); }
+  50% { box-shadow: 0 0 0 12px rgba(201, 162, 39, 0); }
+}
+
+/* Base styles */
+body {
+  font-family: var(--font-body);
+}
+
+h1, h2, h3 {
+  font-family: var(--font-display);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-charcoal-dark);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-moon-dim);
+  border-radius: 3px;
+}
