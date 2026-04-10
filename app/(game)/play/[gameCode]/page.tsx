@@ -25,6 +25,10 @@ export default function PlayerPage() {
   const [playerId, setPlayerId] = useState<number | null>(null);
   const [playerName, setPlayerName] = useState('');
   const [phase, setPhase] = useState<PlayerPhase>('lobby');
+  const [needsJoin, setNeedsJoin] = useState(false);
+  const [joinName, setJoinName] = useState('');
+  const [joinError, setJoinError] = useState('');
+  const [joining, setJoining] = useState(false);
   const [role, setRole] = useState<Role | null>(null);
   const [extraInfo, setExtraInfo] = useState<Record<string, string[]>>({});
   const [alivePlayers, setAlivePlayers] = useState<{ id: number; name: string }[]>([]);
@@ -39,15 +43,23 @@ export default function PlayerPage() {
   const [winReason, setWinReason] = useState('');
   const [testPanelOpen, setTestPanelOpen] = useState(true);
 
-  // Get player info from sessionStorage
+  // Get player info from sessionStorage — or show join form if not found
   useEffect(() => {
     const id = sessionStorage.getItem('playerId');
     const name = sessionStorage.getItem('playerName');
-    if (id) setPlayerId(parseInt(id));
-    if (name) setPlayerName(name);
+    const storedCode = sessionStorage.getItem('gameCode');
+
+    if (id && storedCode?.toUpperCase() === gameCode) {
+      setPlayerId(parseInt(id));
+      if (name) setPlayerName(name);
+    } else {
+      // Player arrived via QR code or direct link — needs to join first
+      setNeedsJoin(true);
+    }
 
     // Test mode (code 6969) — bypass moderator, inject full test state
     if (gameCode === '6969') {
+      setNeedsJoin(false);
       if (!id) {
         setPlayerId(-1);
         setPlayerName('TestPlayer');
@@ -202,6 +214,37 @@ export default function PlayerPage() {
     setHasVoted(true);
   }
 
+  // Join game from QR code / direct link (player wasn't on the home page)
+  async function handleQrJoin() {
+    if (!joinName.trim()) return;
+    setJoining(true);
+    setJoinError('');
+    try {
+      const res = await fetch(`/api/games/${gameCode}/players`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: joinName.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+
+      // Store in sessionStorage (same as the home page join flow)
+      sessionStorage.setItem('playerId', String(data.id));
+      sessionStorage.setItem('playerName', joinName.trim());
+      sessionStorage.setItem('gameCode', gameCode);
+
+      // Update component state
+      setPlayerId(data.id);
+      setPlayerName(joinName.trim());
+      setNeedsJoin(false);
+      setPhase('lobby');
+    } catch (err) {
+      setJoinError(err instanceof Error ? err.message : 'Failed to join');
+    } finally {
+      setJoining(false);
+    }
+  }
+
   // ─── Test Mode ─────────────────────────────────────────────
   // Activates when gameCode is "6969" — lets you jump between player states
   const isTestMode = gameCode === '6969';
@@ -343,6 +386,41 @@ export default function PlayerPage() {
   // Wrap phase content so test panel stays visible
   const renderPhaseContent = () => {
   // ─── Render ────────────────────────────────────────────────
+
+  // Join form — shown when player arrived via QR code or direct link
+  if (needsJoin) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-6">
+        <div className="text-5xl mb-6">🐺</div>
+        <Card className="w-full max-w-sm">
+          <h2 className="text-2xl font-bold text-gold mb-2 text-center">Join Game</h2>
+          <p className="text-moon-dim text-sm text-center mb-6">
+            Game Code: <span className="font-mono text-gold font-bold tracking-wider">{gameCode}</span>
+          </p>
+          <div className="space-y-4">
+            <input
+              className="w-full min-h-[44px] px-4 py-2.5 rounded-lg bg-charcoal-dark border border-moon-dim/20 text-moon placeholder:text-moon-dim/50 focus:outline-none focus:ring-2 focus:ring-gold/50"
+              placeholder="Enter your name"
+              value={joinName}
+              onChange={(e) => { setJoinName(e.target.value); setJoinError(''); }}
+              onKeyDown={(e) => e.key === 'Enter' && handleQrJoin()}
+              autoFocus
+            />
+            {joinError && <p className="text-blood-light text-sm">{joinError}</p>}
+            <Button
+              variant="primary"
+              className="w-full"
+              loading={joining}
+              disabled={!joinName.trim()}
+              onClick={handleQrJoin}
+            >
+              Join Game
+            </Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   // Lobby
   if (phase === 'lobby') {
