@@ -45,9 +45,42 @@ export async function POST(request: NextRequest, { params }: Params) {
     result ?? null,
   );
 
+  const actionId = Number(insertResult.lastInsertRowid);
+  let seerResult: string | null = null;
+
+  // Auto-compute seer investigation result by checking target's actual role
+  if (['seer_peek', 'mystic_wolf_peek'].includes(actionType) && targetPlayerId && !result) {
+    const targetRole = await queryOne<{ name: string; team: string }>(
+      `SELECT r.name, r.team FROM player_roles pr
+       JOIN roles r ON r.id = pr.role_id
+       WHERE pr.player_id = ? AND pr.game_id = ?`,
+      targetPlayerId,
+      game.id,
+    );
+
+    if (targetRole) {
+      // Lycan appears as wolf to the Seer (village team but detected as wolf)
+      // Wolf Man appears as safe to the Seer (werewolf team but detected as villager)
+      if (targetRole.name === 'Lycan') {
+        seerResult = 'wolf';
+      } else if (targetRole.name === 'Wolf Man') {
+        seerResult = 'safe';
+      } else {
+        seerResult = targetRole.team === 'werewolf' ? 'wolf' : 'safe';
+      }
+
+      await run(
+        'UPDATE night_actions SET result = ? WHERE rowid = ?',
+        seerResult,
+        actionId,
+      );
+    }
+  }
+
   return NextResponse.json({
-    id: Number(insertResult.lastInsertRowid),
+    id: actionId,
     success: true,
+    seerResult,
   });
 }
 

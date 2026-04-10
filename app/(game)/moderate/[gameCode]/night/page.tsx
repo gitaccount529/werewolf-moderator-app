@@ -6,7 +6,7 @@ import { useRouter, useParams } from 'next/navigation';
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
 import NightStep from '@/components/NightStep';
-import type { Role, Player, NightResolution } from '@/lib/types';
+import type { Role, Player, NightResolution, PlayerEnrichment } from '@/lib/types';
 
 interface StepData {
   role: Role;
@@ -42,6 +42,7 @@ export default function NightPage() {
   const [resolving, setResolving] = useState(false);
   const [resolution, setResolution] = useState<NightResolution | null>(null);
   const [allStepsComplete, setAllStepsComplete] = useState(false);
+  const [enrichment, setEnrichment] = useState<PlayerEnrichment | null>(null);
   const [itemRecipient, setItemRecipient] = useState<number | null>(null);
   const [itemAssigned, setItemAssigned] = useState(false);
 
@@ -59,6 +60,7 @@ export default function NightPage() {
         const data = await nightRes.json();
         setRound(data.round);
         setSteps(data.steps);
+        setEnrichment(data.enrichment ?? null);
         setLoading(false);
       }
 
@@ -93,7 +95,7 @@ export default function NightPage() {
       const actor = step.actors[0]; // Primary actor
 
       // Record the action
-      await fetch(`/api/games/${gameCode}/actions`, {
+      const actionRes = await fetch(`/api/games/${gameCode}/actions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -104,6 +106,40 @@ export default function NightPage() {
           actionType: action.actionType,
         }),
       });
+      const actionData = await actionRes.json();
+
+      // Optimistic enrichment updates — update indicators immediately
+      // so the moderator sees them on the next step without re-fetching
+      if (enrichment && action.targetPlayerId) {
+        const tid = action.targetPlayerId;
+
+        // Seer investigation result — returned by the actions API
+        if (actionData.seerResult && ['seer_peek', 'mystic_wolf_peek'].includes(action.actionType)) {
+          setEnrichment((prev) => prev ? {
+            ...prev,
+            investigations: {
+              ...prev.investigations,
+              [tid]: { result: actionData.seerResult, round },
+            },
+          } : prev);
+        }
+
+        // Bodyguard protection
+        if (action.actionType === 'bodyguard_protect') {
+          setEnrichment((prev) => prev ? {
+            ...prev,
+            protectedIds: [...prev.protectedIds, tid],
+          } : prev);
+        }
+
+        // Sentinel shield
+        if (action.actionType === 'sentinel_shield') {
+          setEnrichment((prev) => prev ? {
+            ...prev,
+            sentinelShieldedIds: [...prev.sentinelShieldedIds, tid],
+          } : prev);
+        }
+      }
 
       // Handle Cupid lover link — store in metadata
       if (action.actionType === 'cupid_link' && action.secondTargetId) {
@@ -115,6 +151,22 @@ export default function NightPage() {
             metadata: { lovers: [action.targetPlayerId, action.secondTargetId] },
           }),
         });
+      }
+
+      // Handle Priest blessing — store in metadata
+      if (action.actionType === 'priest_bless' && action.targetPlayerId) {
+        await fetch(`/api/games/${gameCode}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'update_metadata',
+            metadata: { priest_blessed: [action.targetPlayerId] },
+          }),
+        });
+        setEnrichment((prev) => prev ? {
+          ...prev,
+          priestBlessedIds: [...prev.priestBlessedIds, action.targetPlayerId!],
+        } : prev);
       }
 
       // Send sleep signal to actors via API
@@ -397,6 +449,7 @@ export default function NightPage() {
         alivePlayers={alivePlayers}
         round={round}
         lang={lang}
+        enrichment={enrichment}
         onAction={handleAction}
         onSkip={handleSkip}
       />

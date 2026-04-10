@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Button from '@/components/ui/Button';
-import type { Role, Player } from '@/lib/types';
+import type { Role, PlayerEnrichment, PlayerIndicator } from '@/lib/types';
 
 interface Actor {
   id: number;
@@ -21,9 +21,55 @@ interface NightStepProps {
   alivePlayers: AlivePlayer[];
   round: number;
   lang?: 'en' | 'tl';
+  enrichment?: PlayerEnrichment | null;
   onAction: (action: { targetPlayerId?: number; actionType: string; secondTargetId?: number }) => void;
   onSkip: () => void;
 }
+
+// ─── Indicator Builder ───────────────────────────────────────
+
+const SEER_ROLES = new Set(['Seer', 'Apprentice Seer', 'Mystic Wolf']);
+const KILL_ROLES = new Set(['Werewolf', 'Fruit Brute', 'Lone Wolf', 'Dire Wolf', 'Alpha Wolf']);
+
+function buildIndicators(
+  roleName: string,
+  players: { id: number }[],
+  enrichment: PlayerEnrichment | null | undefined,
+): Record<number, PlayerIndicator> {
+  if (!enrichment) return {};
+  const result: Record<number, PlayerIndicator> = {};
+
+  const isSeerRole = SEER_ROLES.has(roleName);
+  const isKillRole = KILL_ROLES.has(roleName);
+
+  for (const p of players) {
+    const ind: PlayerIndicator = {};
+
+    // Seer: show past investigation results
+    if (isSeerRole && enrichment.investigations[p.id]) {
+      ind.seerResult = enrichment.investigations[p.id].result;
+    }
+
+    // Kill roles: show protection indicators
+    if (isKillRole || roleName === 'Witch') {
+      const sources: string[] = [];
+      if (enrichment.protectedIds.includes(p.id)) sources.push('Bodyguard');
+      if (enrichment.priestBlessedIds.includes(p.id)) sources.push('Priest');
+      if (enrichment.sentinelShieldedIds.includes(p.id)) sources.push('Sentinel');
+      if (enrichment.sandwichHolderIds.includes(p.id)) sources.push('Sandwich');
+      if (sources.length > 0) {
+        ind.isProtected = true;
+        ind.protectionLabel = sources.join(', ');
+      }
+    }
+
+    if (Object.keys(ind).length > 0) result[p.id] = ind;
+  }
+
+  return result;
+}
+
+// ─── Main Component ──────────────────────────────────────────
 
 export default function NightStep({
   role,
@@ -31,6 +77,7 @@ export default function NightStep({
   alivePlayers,
   round,
   lang = 'en',
+  enrichment,
   onAction,
   onSkip,
 }: NightStepProps) {
@@ -42,6 +89,9 @@ export default function NightStep({
   const nonActorPlayers = alivePlayers.filter(
     (p) => !actors.find((a) => a.id === p.id),
   );
+
+  // Build indicators for the current role
+  const indicators = buildIndicators(role.name, alivePlayers, enrichment);
 
   function handleSubmit() {
     const roleName = role.name;
@@ -94,6 +144,9 @@ export default function NightStep({
         break;
       case 'Sentinel':
         if (selectedTarget) onAction({ targetPlayerId: selectedTarget, actionType: 'sentinel_shield' });
+        break;
+      case 'Priest':
+        if (selectedTarget) onAction({ targetPlayerId: selectedTarget, actionType: 'priest_bless' });
         break;
       case 'Cult Leader':
         if (selectedTarget) onAction({ targetPlayerId: selectedTarget, actionType: 'cult_recruit' });
@@ -184,6 +237,7 @@ export default function NightStep({
               players={nonActorPlayers}
               selected={witchKillTarget}
               onSelect={setWitchKillTarget}
+              indicators={indicators}
             />
           </div>
 
@@ -233,6 +287,7 @@ export default function NightStep({
             players={role.name === 'Bodyguard' ? alivePlayers : nonActorPlayers}
             selected={selectedTarget}
             onSelect={setSelectedTarget}
+            indicators={indicators}
           />
           <div className="flex gap-3">
             <Button
@@ -254,34 +309,75 @@ export default function NightStep({
   );
 }
 
-// ─── Player Selection Grid ──────────────────────────────────
+// ─── Player Selection Grid with Indicators ───────────────────
 
 function PlayerGrid({
   players,
   selected,
   onSelect,
+  indicators,
 }: {
   players: { id: number; name: string }[];
   selected: number | null;
   onSelect: (id: number) => void;
+  indicators?: Record<number, PlayerIndicator>;
 }) {
   return (
     <div className="grid grid-cols-2 gap-2">
-      {players.map((p) => (
-        <button
-          key={p.id}
-          className={`
-            min-h-[44px] px-4 py-2.5 rounded-lg text-left transition-all
-            ${selected === p.id
-              ? 'bg-gold text-charcoal-dark font-semibold ring-2 ring-gold'
-              : 'bg-charcoal hover:bg-charcoal-light text-moon'
-            }
-          `}
-          onClick={() => onSelect(p.id)}
-        >
-          {p.name}
-        </button>
-      ))}
+      {players.map((p) => {
+        const ind = indicators?.[p.id];
+        const isSelected = selected === p.id;
+
+        // Indicator-based styling (only when NOT selected — gold overrides everything)
+        let indicatorBg = '';
+        if (!isSelected && ind?.seerResult === 'wolf') {
+          indicatorBg = 'ring-2 ring-blood/60 bg-blood/10';
+        } else if (!isSelected && ind?.seerResult === 'safe') {
+          indicatorBg = 'ring-2 ring-forest/60 bg-forest/10';
+        }
+
+        return (
+          <button
+            key={p.id}
+            className={`
+              min-h-[44px] px-4 py-2.5 rounded-lg text-left transition-all
+              ${isSelected
+                ? 'bg-gold text-charcoal-dark font-semibold ring-2 ring-gold'
+                : `bg-charcoal hover:bg-charcoal-light text-moon ${indicatorBg}`
+              }
+            `}
+            onClick={() => onSelect(p.id)}
+          >
+            <div className="flex items-center justify-between w-full gap-2">
+              <span className="truncate">{p.name}</span>
+              <div className="flex items-center gap-1 shrink-0">
+                {ind?.seerResult === 'wolf' && (
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                    isSelected ? 'text-blood bg-blood/20' : 'text-blood-light'
+                  }`}>
+                    WOLF
+                  </span>
+                )}
+                {ind?.seerResult === 'safe' && (
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                    isSelected ? 'text-forest bg-forest/20' : 'text-forest-light'
+                  }`}>
+                    SAFE
+                  </span>
+                )}
+                {ind?.isProtected && (
+                  <span
+                    className="text-sm"
+                    title={ind.protectionLabel}
+                  >
+                    🛡
+                  </span>
+                )}
+              </div>
+            </div>
+          </button>
+        );
+      })}
     </div>
   );
 }

@@ -26,6 +26,7 @@ export interface Game {
   pin_hash: string;
   status: GameStatus;
   current_round: number;
+  metadata_json: string;
   created_at: string;
 }
 
@@ -139,4 +140,26 @@ export interface NightResolution {
   pendingItemAssignment?: ItemType | null;
   firstDeathPlayerId?: number | null;
   firstDeathPlayerName?: string | null;
+}
+
+// ─── Night Step Enrichment (moderator-only) ──────────────────
+export type SeerResult = 'wolf' | 'safe';
+
+export interface PlayerEnrichment {
+  /** Past seer/mystic wolf investigation results keyed by target player ID */
+  investigations: Record<number, { result: SeerResult; round: number }>;
+  /** Players protected by bodyguard THIS round */
+  protectedIds: number[];
+  /** Players blessed by priest (persists until consumed by a wolf attack) */
+  priestBlessedIds: number[];
+  /** Players shielded by sentinel (night 1 only) */
+  sentinelShieldedIds: number[];
+  /** Players holding an active (unused) sandwich item */
+  sandwichHolderIds: number[];
+}
+
+export interface PlayerIndicator {
+  seerResult?: SeerResult;
+  isProtected?: boolean;
+  protectionLabel?: string;
 }
