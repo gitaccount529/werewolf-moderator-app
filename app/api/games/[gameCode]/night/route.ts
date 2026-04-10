@@ -61,8 +61,11 @@ export async function GET(_request: NextRequest, { params }: Params) {
         round: row.round,
       };
     }
-    if (row.action_type === 'seer_peek') seerChecked[row.target_player_id] = true;
-    if (row.action_type === 'mystic_wolf_peek') mysticWolfChecked[row.target_player_id] = true;
+    // Only mark as "checked" if investigated in a PRIOR round (not current)
+    if (row.round < game.current_round) {
+      if (row.action_type === 'seer_peek') seerChecked[row.target_player_id] = true;
+      if (row.action_type === 'mystic_wolf_peek') mysticWolfChecked[row.target_player_id] = true;
+    }
   }
 
   // ─── Enrichment: current-round protections ─────────────────
