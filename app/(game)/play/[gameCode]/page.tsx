@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { usePusher } from '@/hooks/usePusher';
 import Button from '@/components/ui/Button';
@@ -24,6 +24,7 @@ export default function PlayerPage() {
   const { subscribe } = usePusher();
 
   const [playerId, setPlayerId] = useState<number | null>(null);
+  const playerIdRef = useRef<number | null>(null);
   const [playerName, setPlayerName] = useState('');
   const [phase, setPhase] = useState<PlayerPhase>('lobby');
   const [needsJoin, setNeedsJoin] = useState(false);
@@ -43,6 +44,9 @@ export default function PlayerPage() {
   const [winningTeam, setWinningTeam] = useState<WinningTeam>(null);
   const [winReason, setWinReason] = useState('');
   const [testPanelOpen, setTestPanelOpen] = useState(true);
+
+  // Keep playerIdRef in sync for Pusher callbacks (avoids stale closure)
+  useEffect(() => { playerIdRef.current = playerId; }, [playerId]);
 
   // Get player info from sessionStorage — or show join form if not found
   useEffect(() => {
@@ -108,7 +112,17 @@ export default function PlayerPage() {
     );
 
     const me = data.players.find((p: Player) => p.id === playerId);
-    const isDead = me && me.is_alive === 0;
+
+    // Player was kicked (no longer in the players list) — redirect to home
+    if (!me) {
+      sessionStorage.removeItem('playerId');
+      sessionStorage.removeItem('playerName');
+      sessionStorage.removeItem('gameCode');
+      router.push('/?kicked=1');
+      return;
+    }
+
+    const isDead = me.is_alive === 0;
 
     // Phase reconciliation — server status is source of truth
     // Only reconcile if current phase is clearly out of sync with game status
@@ -179,8 +193,8 @@ export default function PlayerPage() {
       },
       'player:kicked': (data: unknown) => {
         const d = data as { playerId?: number };
-        if (d.playerId === playerId) {
-          // Clear session and redirect to home
+        // Use ref instead of state to avoid stale closure
+        if (d.playerId === playerIdRef.current) {
           sessionStorage.removeItem('playerId');
           sessionStorage.removeItem('playerName');
           sessionStorage.removeItem('gameCode');
@@ -254,6 +268,25 @@ export default function PlayerPage() {
     } finally {
       setJoining(false);
     }
+  }
+
+  // Leave game voluntarily — removes player from DB and notifies moderator
+  async function handleLeaveGame() {
+    if (playerId && playerId > 0) {
+      try {
+        await fetch(`/api/games/${gameCode}/players`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ playerId }),
+        });
+      } catch {
+        // If the API fails, still navigate away — the player wants to leave
+      }
+    }
+    sessionStorage.removeItem('playerId');
+    sessionStorage.removeItem('playerName');
+    sessionStorage.removeItem('gameCode');
+    router.push('/');
   }
 
   // ─── Test Mode ─────────────────────────────────────────────
@@ -444,6 +477,12 @@ export default function PlayerPage() {
           <p className="text-sm text-moon-dim">Game Code</p>
           <p className="text-3xl font-mono font-bold text-gold tracking-[0.3em]">{gameCode}</p>
         </Card>
+        <button
+          className="mt-8 text-sm text-moon-dim/60 hover:text-blood-light transition-colors"
+          onClick={handleLeaveGame}
+        >
+          Leave Game
+        </button>
       </div>
     );
   }
