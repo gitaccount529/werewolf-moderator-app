@@ -32,20 +32,28 @@ export async function GET(_request: NextRequest, { params }: Params) {
   }));
 
   // ─── Enrichment: past investigations ───────────────────────
+  // Track which players were investigated by each peek role separately,
+  // so "checked" only shows for the role currently acting.
   const pastInvestigations = await queryAll<{
     target_player_id: number;
     result: string;
     round: number;
+    action_type: string;
   }>(
-    `SELECT target_player_id, result, round FROM night_actions
+    `SELECT target_player_id, result, round, action_type FROM night_actions
      WHERE game_id = ? AND action_type IN ('seer_peek', 'mystic_wolf_peek')
      AND result IS NOT NULL`,
     game.id,
   );
 
+  // All investigation results (for showing wolf/safe labels)
   const investigations: Record<number, { result: SeerResult; round: number }> = {};
+  // Seer-only investigations (for "checked" indicator on Seer turn)
+  const seerChecked: Record<number, true> = {};
+  // Mystic Wolf-only investigations (for "checked" on Mystic Wolf turn)
+  const mysticWolfChecked: Record<number, true> = {};
+
   for (const row of pastInvestigations) {
-    // Latest round wins if investigated multiple times
     const existing = investigations[row.target_player_id];
     if (!existing || row.round > existing.round) {
       investigations[row.target_player_id] = {
@@ -53,6 +61,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
         round: row.round,
       };
     }
+    if (row.action_type === 'seer_peek') seerChecked[row.target_player_id] = true;
+    if (row.action_type === 'mystic_wolf_peek') mysticWolfChecked[row.target_player_id] = true;
   }
 
   // ─── Enrichment: current-round protections ─────────────────
@@ -121,6 +131,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
 
   const enrichment: PlayerEnrichment = {
     investigations,
+    seerChecked,
+    mysticWolfChecked,
     protectedIds,
     priestBlessedIds,
     sentinelShieldedIds,

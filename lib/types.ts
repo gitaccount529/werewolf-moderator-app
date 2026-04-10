@@ -156,6 +156,10 @@ export interface PlayerEnrichment {
   sentinelShieldedIds: number[];
   /** Players holding an active (unused) sandwich item */
   sandwichHolderIds: number[];
+  /** Players the Seer specifically investigated in prior rounds */
+  seerChecked: Record<number, true>;
+  /** Players the Mystic Wolf specifically investigated in prior rounds */
+  mysticWolfChecked: Record<number, true>;
   /** True wolf/safe status for ALL alive players (moderator cheat sheet for Seer turn) */
   seerTruth: Record<number, SeerResult>;
   /** Wolf kill target this round (for Witch to know who to save) */

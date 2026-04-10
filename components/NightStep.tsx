@@ -46,15 +46,18 @@ function buildIndicators(
     const ind: PlayerIndicator = {};
 
     // Seer: show wolf/safe truth for ALL players (moderator cheat sheet)
-    // Plus mark already-investigated players
+    // Plus mark already-investigated players (only by THIS role, not other peek roles)
     if (isSeerRole) {
       // Show truth from seerTruth (accounts for Lycan/Wolf Man deceptions)
       if (enrichment.seerTruth?.[p.id]) {
         ind.seerResult = enrichment.seerTruth[p.id];
       }
-      // Mark if already investigated in a prior round
-      if (enrichment.investigations[p.id]) {
-        ind.alreadyInvestigated = true;
+      // Mark if already investigated by THIS specific role in a prior round
+      if (roleName === 'Mystic Wolf') {
+        if (enrichment.mysticWolfChecked?.[p.id]) ind.alreadyInvestigated = true;
+      } else {
+        // Seer and Apprentice Seer share the seer_peek action
+        if (enrichment.seerChecked?.[p.id]) ind.alreadyInvestigated = true;
       }
     }
 
