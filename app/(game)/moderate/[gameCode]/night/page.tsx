@@ -43,6 +43,7 @@ export default function NightPage() {
   const [resolution, setResolution] = useState<NightResolution | null>(null);
   const [allStepsComplete, setAllStepsComplete] = useState(false);
   const [enrichment, setEnrichment] = useState<PlayerEnrichment | null>(null);
+  const [seerFlash, setSeerFlash] = useState<{ name: string; result: string } | null>(null);
   const [itemRecipient, setItemRecipient] = useState<number | null>(null);
   const [itemAssigned, setItemAssigned] = useState(false);
 
@@ -113,14 +114,30 @@ export default function NightPage() {
       if (enrichment && action.targetPlayerId) {
         const tid = action.targetPlayerId;
 
-        // Seer investigation result — returned by the actions API
+        // Seer investigation result — show immediately to moderator
         if (actionData.seerResult && ['seer_peek', 'mystic_wolf_peek'].includes(action.actionType)) {
+          const targetName = alivePlayers.find((p) => p.id === tid)?.name || 'Unknown';
+          const isWolf = actionData.seerResult === 'wolf';
+          setSeerFlash({ name: targetName, result: actionData.seerResult });
+          // Auto-clear after 4 seconds
+          setTimeout(() => setSeerFlash(null), 4000);
+
           setEnrichment((prev) => prev ? {
             ...prev,
             investigations: {
               ...prev.investigations,
               [tid]: { result: actionData.seerResult, round },
             },
+          } : prev);
+        }
+
+        // Wolf kill target — track for Witch step
+        if (['werewolf_kill', 'lone_wolf_kill'].includes(action.actionType)) {
+          const targetName = alivePlayers.find((p) => p.id === tid)?.name || 'Unknown';
+          setEnrichment((prev) => prev ? {
+            ...prev,
+            wolfKillTargetId: tid,
+            wolfKillTargetName: targetName,
           } : prev);
         }
 
@@ -441,6 +458,22 @@ export default function NightPage() {
           style={{ width: `${((currentStepIndex + 1) / steps.length) * 100}%` }}
         />
       </div>
+
+      {/* Seer result flash — shows for 4s after investigating */}
+      {seerFlash && (
+        <div className={`rounded-xl p-4 mb-6 text-center font-semibold animate-pulse ${
+          seerFlash.result === 'wolf'
+            ? 'bg-blood/30 border-2 border-blood text-blood-light'
+            : 'bg-forest/30 border-2 border-forest text-forest-light'
+        }`}>
+          <p className="text-lg">
+            {seerFlash.name} is {seerFlash.result === 'wolf' ? '🐺 A WOLF' : '✅ SAFE'}
+          </p>
+          <p className="text-xs opacity-70 mt-1">
+            {seerFlash.result === 'wolf' ? 'Give thumbs UP to the Seer' : 'Give thumbs DOWN to the Seer'}
+          </p>
+        </div>
+      )}
 
       {/* Current step */}
       <NightStep

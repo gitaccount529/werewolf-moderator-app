@@ -88,6 +88,12 @@ export default function SetupPage() {
         setGameName(gameData.game.name);
         setPlayers(gameData.players);
 
+        // Hydrate items toggle from saved metadata
+        try {
+          const meta = JSON.parse(gameData.game.metadata_json || '{}');
+          if (meta.items_enabled) setItemsEnabled(true);
+        } catch { /* ignore parse errors */ }
+
         if (gameData.game.status !== 'lobby') {
           router.push(`/moderate/${gameCode}/night`);
           return;
@@ -415,7 +421,8 @@ export default function SetupPage() {
       }
 
       // Broadcast is now handled by the API route (assign_roles or manual_assign)
-      router.push(`/moderate/${gameCode}/night`);
+      // Go to role reveal screen before Night 1 starts
+      router.push(`/moderate/${gameCode}/reveal`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start game');
     } finally {

@@ -217,6 +217,18 @@ export default function NightStep({
         </div>
       ) : isWitch ? (
         <div className="space-y-4">
+          {/* Wolf target reveal */}
+          {enrichment?.wolfKillTargetName ? (
+            <div className="bg-blood/20 border border-blood/40 rounded-xl p-4 text-center">
+              <p className="text-xs text-moon-dim mb-1">The werewolves targeted:</p>
+              <p className="text-xl font-bold text-blood-light">{enrichment.wolfKillTargetName}</p>
+            </div>
+          ) : (
+            <div className="bg-charcoal rounded-xl p-4 text-center">
+              <p className="text-sm text-moon-dim">No wolf kill recorded this round.</p>
+            </div>
+          )}
+
           {/* Witch save */}
           <div className="bg-charcoal rounded-lg p-4">
             <label className="flex items-center gap-3 cursor-pointer">
@@ -226,7 +238,9 @@ export default function NightStep({
                 onChange={(e) => setWitchSave(e.target.checked)}
                 className="w-5 h-5 rounded accent-gold"
               />
-              <span className="text-moon">Use healing potion (save the victim)?</span>
+              <span className="text-moon">
+                Use healing potion{enrichment?.wolfKillTargetName ? ` (save ${enrichment.wolfKillTargetName})` : ' (save the victim)'}?
+              </span>
             </label>
           </div>
 

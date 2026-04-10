@@ -80,12 +80,31 @@ export async function GET(_request: NextRequest, { params }: Params) {
     .filter((i: { type: string; used: boolean }) => i.type === 'sandwich' && !i.used)
     .map((i: { holderPlayerId: number }) => i.holderPlayerId);
 
+  // ─── Enrichment: wolf kill target this round (for Witch) ────
+  const wolfKillAction = await queryOne<{ target_player_id: number }>(
+    `SELECT target_player_id FROM night_actions
+     WHERE game_id = ? AND round = ? AND action_type = 'werewolf_kill'`,
+    game.id,
+    game.current_round,
+  );
+  let wolfKillTargetId: number | null = wolfKillAction?.target_player_id ?? null;
+  let wolfKillTargetName: string | null = null;
+  if (wolfKillTargetId) {
+    const targetPlayer = await queryOne<{ name: string }>(
+      'SELECT name FROM players WHERE id = ?',
+      wolfKillTargetId,
+    );
+    wolfKillTargetName = targetPlayer?.name ?? null;
+  }
+
   const enrichment: PlayerEnrichment = {
     investigations,
     protectedIds,
     priestBlessedIds,
     sentinelShieldedIds,
     sandwichHolderIds,
+    wolfKillTargetId,
+    wolfKillTargetName,
   };
 
   return NextResponse.json({

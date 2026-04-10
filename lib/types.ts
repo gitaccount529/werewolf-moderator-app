@@ -156,6 +156,10 @@ export interface PlayerEnrichment {
   sentinelShieldedIds: number[];
   /** Players holding an active (unused) sandwich item */
   sandwichHolderIds: number[];
+  /** Wolf kill target this round (for Witch to know who to save) */
+  wolfKillTargetId: number | null;
+  /** Wolf kill target name (for display) */
+  wolfKillTargetName: string | null;
 }
 
 export interface PlayerIndicator {
