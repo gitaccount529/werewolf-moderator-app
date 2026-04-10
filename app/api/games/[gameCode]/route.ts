@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { queryOne, queryAll, run, transaction } from '@/lib/db';
-import type { Game, Player, GameRole } from '@/lib/types';
+import { broadcast } from '@/lib/realtime';
+import type { Game, Player } from '@/lib/types';
 
 type Params = { params: Promise<{ gameCode: string }> };
 
@@ -8,7 +9,7 @@ type Params = { params: Promise<{ gameCode: string }> };
 export async function GET(_request: NextRequest, { params }: Params) {
   const { gameCode } = await params;
 
-  const game = queryOne<Game>(
+  const game = await queryOne<Game>(
     'SELECT id, code, name, status, current_round, metadata_json, created_at FROM games WHERE code = ?',
     gameCode.toUpperCase(),
   );
@@ -17,12 +18,12 @@ export async function GET(_request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: 'Game not found' }, { status: 404 });
   }
 
-  const players = queryAll<Player>(
+  const players = await queryAll<Player>(
     'SELECT * FROM players WHERE game_id = ? ORDER BY seat_order, joined_at',
     game.id,
   );
 
-  const gameRoles = queryAll<GameRole & { role_name: string; role_team: string }>(
+  const gameRoles = await queryAll<{ id: number; game_id: number; role_id: number; count: number; role_name: string; role_team: string }>(
     `SELECT gr.*, r.name as role_name, r.team as role_team
      FROM game_roles gr JOIN roles r ON gr.role_id = r.id
      WHERE gr.game_id = ?`,
@@ -36,9 +37,9 @@ export async function GET(_request: NextRequest, { params }: Params) {
 export async function PATCH(request: NextRequest, { params }: Params) {
   const { gameCode } = await params;
   const body = await request.json();
-  const { action, pin } = body as { action: string; pin?: string };
+  const { action } = body as { action: string; pin?: string };
 
-  const game = queryOne<Game>(
+  const game = await queryOne<Game>(
     'SELECT * FROM games WHERE code = ?',
     gameCode.toUpperCase(),
   );
@@ -53,12 +54,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         return NextResponse.json({ error: 'Game is not in lobby' }, { status: 400 });
       }
 
-      const players = queryAll<Player>(
+      const players = await queryAll<Player>(
         'SELECT * FROM players WHERE game_id = ? ORDER BY seat_order, joined_at',
         game.id,
       );
 
-      const gameRoles = queryAll<{ role_id: number; count: number }>(
+      const gameRoles = await queryAll<{ role_id: number; count: number }>(
         'SELECT role_id, count FROM game_roles WHERE game_id = ?',
         game.id,
       );
@@ -86,33 +87,35 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         [rolePool[i], rolePool[j]] = [rolePool[j], rolePool[i]];
       }
 
-      transaction(() => {
+      await transaction(async (tx) => {
         // Assign roles
         for (let i = 0; i < players.length; i++) {
-          run(
-            'INSERT INTO player_roles (player_id, game_id, role_id) VALUES (?, ?, ?)',
-            players[i].id,
-            game.id,
-            rolePool[i],
-          );
+          await tx.execute({
+            sql: 'INSERT INTO player_roles (player_id, game_id, role_id) VALUES (?, ?, ?)',
+            args: [players[i].id, game.id, rolePool[i]],
+          });
           // Update seat order
-          run('UPDATE players SET seat_order = ? WHERE id = ?', i, players[i].id);
+          await tx.execute({
+            sql: 'UPDATE players SET seat_order = ? WHERE id = ?',
+            args: [i, players[i].id],
+          });
         }
 
         // Transition to night, round 1
-        run(
-          'UPDATE games SET status = ?, current_round = 1 WHERE id = ?',
-          'night',
-          game.id,
-        );
+        await tx.execute({
+          sql: 'UPDATE games SET status = ?, current_round = 1 WHERE id = ?',
+          args: ['night', game.id],
+        });
 
         // Log the event
-        run(
-          `INSERT INTO game_log (game_id, round, phase, event_type, description)
-           VALUES (?, 1, 'setup', 'roles_assigned', 'Roles have been assigned to all players')`,
-          game.id,
-        );
+        await tx.execute({
+          sql: `INSERT INTO game_log (game_id, round, phase, event_type, description)
+                VALUES (?, 1, 'setup', 'roles_assigned', 'Roles have been assigned to all players')`,
+          args: [game.id],
+        });
       });
+
+      await broadcast(gameCode, 'game:started', {});
 
       return NextResponse.json({ success: true, status: 'night' });
     }
@@ -123,14 +126,14 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       }
 
       const newRound = game.current_round + 1;
-      run(
+      await run(
         'UPDATE games SET status = ?, current_round = ? WHERE id = ?',
         'night',
         newRound,
         game.id,
       );
 
-      run(
+      await run(
         `INSERT INTO game_log (game_id, round, phase, event_type, description)
          VALUES (?, ?, 'night', 'night_start', ?)`,
         game.id,
@@ -146,9 +149,9 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         return NextResponse.json({ error: 'Game is not in night phase' }, { status: 400 });
       }
 
-      run('UPDATE games SET status = ? WHERE id = ?', 'day', game.id);
+      await run('UPDATE games SET status = ? WHERE id = ?', 'day', game.id);
 
-      run(
+      await run(
         `INSERT INTO game_log (game_id, round, phase, event_type, description)
          VALUES (?, ?, 'day', 'day_start', ?)`,
         game.id,
@@ -156,16 +159,18 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         `Day ${game.current_round} begins`,
       );
 
+      await broadcast(gameCode, 'day:started', {});
+
       return NextResponse.json({ success: true, status: 'day' });
     }
 
     case 'end_game': {
-      run('UPDATE games SET status = ? WHERE id = ?', 'ended', game.id);
+      await run('UPDATE games SET status = ? WHERE id = ?', 'ended', game.id);
 
       const reason = body.reason || 'Game ended by moderator';
       const winningTeam = body.winningTeam || null;
 
-      run(
+      await run(
         `INSERT INTO game_log (game_id, round, phase, event_type, description, details_json)
          VALUES (?, ?, 'end', 'game_end', ?, ?)`,
         game.id,
@@ -173,6 +178,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         reason,
         winningTeam ? JSON.stringify({ winningTeam }) : null,
       );
+
+      await broadcast(gameCode, 'game:ended', { winningTeam, reason });
 
       return NextResponse.json({ success: true, status: 'ended' });
     }
@@ -187,7 +194,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         return NextResponse.json({ error: 'assignments array is required' }, { status: 400 });
       }
 
-      const allPlayers = queryAll<Player>(
+      const allPlayers = await queryAll<Player>(
         'SELECT * FROM players WHERE game_id = ? ORDER BY seat_order, joined_at',
         game.id,
       );
@@ -199,30 +206,32 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         );
       }
 
-      transaction(() => {
+      await transaction(async (tx) => {
         for (let i = 0; i < assignments.length; i++) {
           const { playerId, roleId } = assignments[i];
-          run(
-            'INSERT INTO player_roles (player_id, game_id, role_id) VALUES (?, ?, ?)',
-            playerId,
-            game.id,
-            roleId,
-          );
-          run('UPDATE players SET seat_order = ? WHERE id = ?', i, playerId);
+          await tx.execute({
+            sql: 'INSERT INTO player_roles (player_id, game_id, role_id) VALUES (?, ?, ?)',
+            args: [playerId, game.id, roleId],
+          });
+          await tx.execute({
+            sql: 'UPDATE players SET seat_order = ? WHERE id = ?',
+            args: [i, playerId],
+          });
         }
 
-        run(
-          'UPDATE games SET status = ?, current_round = 1 WHERE id = ?',
-          'night',
-          game.id,
-        );
+        await tx.execute({
+          sql: 'UPDATE games SET status = ?, current_round = 1 WHERE id = ?',
+          args: ['night', game.id],
+        });
 
-        run(
-          `INSERT INTO game_log (game_id, round, phase, event_type, description)
-           VALUES (?, 1, 'setup', 'roles_assigned', 'Roles have been manually assigned to all players')`,
-          game.id,
-        );
+        await tx.execute({
+          sql: `INSERT INTO game_log (game_id, round, phase, event_type, description)
+                VALUES (?, 1, 'setup', 'roles_assigned', 'Roles have been manually assigned to all players')`,
+          args: [game.id],
+        });
       });
+
+      await broadcast(gameCode, 'game:started', {});
 
       return NextResponse.json({ success: true, status: 'night' });
     }
@@ -234,7 +243,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       }
       const existing = JSON.parse((game as Game & { metadata_json?: string }).metadata_json || '{}');
       const merged = { ...existing, ...metadata };
-      run('UPDATE games SET metadata_json = ? WHERE id = ?', JSON.stringify(merged), game.id);
+      await run('UPDATE games SET metadata_json = ? WHERE id = ?', JSON.stringify(merged), game.id);
       return NextResponse.json({ success: true });
     }
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { useSocket } from '@/hooks/useSocket';
+import { usePusher } from '@/hooks/usePusher';
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
 import PlayerList from '@/components/PlayerList';
@@ -28,7 +28,7 @@ export default function SetupPage() {
   const router = useRouter();
   const params = useParams();
   const gameCode = (params.gameCode as string).toUpperCase();
-  const { socket, isConnected, joinRoom } = useSocket();
+  const { subscribe } = usePusher();
 
   const [gameName, setGameName] = useState('');
   const [roles, setRoles] = useState<Role[]>([]);
@@ -58,16 +58,21 @@ export default function SetupPage() {
   const [difficulty, setDifficulty] = useState<Difficulty>('medium');
   const [itemsEnabled, setItemsEnabled] = useState(false);
 
-  // Join socket room as moderator + catch-up fetch
+  // Subscribe to game channel for real-time updates
   useEffect(() => {
-    if (isConnected) {
-      joinRoom({ gameCode, name: 'Moderator', isModerator: true });
-      // Refetch after joining room — covers events missed during the connect→join gap
-      fetch(`/api/games/${gameCode}/players`)
-        .then((r) => r.json())
-        .then((data) => { if (Array.isArray(data)) setPlayers(data); });
-    }
-  }, [isConnected, gameCode, joinRoom]);
+    return subscribe(`game-${gameCode}`, {
+      'player:joined': () => {
+        fetch(`/api/games/${gameCode}/players`)
+          .then((r) => r.json())
+          .then((data) => { if (Array.isArray(data)) setPlayers(data); });
+      },
+      'player:left': () => {
+        fetch(`/api/games/${gameCode}/players`)
+          .then((r) => r.json())
+          .then((data) => { if (Array.isArray(data)) setPlayers(data); });
+      },
+    });
+  }, [gameCode, subscribe]);
 
   // Fetch game data, roles, and templates
   useEffect(() => {
@@ -109,24 +114,8 @@ export default function SetupPage() {
     load();
   }, [gameCode, router]);
 
-  // Track player count from socket
-  useEffect(() => {
-    if (!socket) return;
-
-    const handleUpdate = () => {
-      fetch(`/api/games/${gameCode}/players`)
-        .then((r) => r.json())
-        .then((data) => { if (Array.isArray(data)) setPlayers(data); });
-    };
-
-    socket.on('player:joined', handleUpdate);
-    socket.on('player:left', handleUpdate);
-
-    return () => {
-      socket.off('player:joined', handleUpdate);
-      socket.off('player:left', handleUpdate);
-    };
-  }, [socket, gameCode]);
+  // (Player tracking now handled by Pusher subscribe above + PlayerList polling)
+  // Player updates now handled by: Pusher subscription above + PlayerList 5s polling
 
   // Save role selections
   const saveSelections = useCallback(
@@ -425,7 +414,7 @@ export default function SetupPage() {
         if (!res.ok) throw new Error(data.error);
       }
 
-      socket?.emit('game:start', { gameCode });
+      // Broadcast is now handled by the API route (assign_roles or manual_assign)
       router.push(`/moderate/${gameCode}/night`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start game');

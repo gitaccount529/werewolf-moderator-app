@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { queryAll, queryOne, run } from '@/lib/db';
+import { queryAll, run } from '@/lib/db';
 import type { RoleTemplate } from '@/lib/types';
 
 // GET /api/templates — List all templates
 export async function GET() {
-  const templates = queryAll<RoleTemplate>(
+  const templates = await queryAll<RoleTemplate>(
     'SELECT * FROM role_templates ORDER BY created_at DESC',
   );
   return NextResponse.json(templates);
@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const result = run(
+  const result = await run(
     'INSERT INTO role_templates (name, player_count, roles_json) VALUES (?, ?, ?)',
     name,
     playerCount,
@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
   );
 
   return NextResponse.json({
-    id: result.lastInsertRowid,
+    id: Number(result.lastInsertRowid),
     name,
     playerCount,
   });
@@ -46,6 +46,6 @@ export async function DELETE(request: NextRequest) {
   if (!id) {
     return NextResponse.json({ error: 'Template ID required' }, { status: 400 });
   }
-  run('DELETE FROM role_templates WHERE id = ?', parseInt(id));
+  await run('DELETE FROM role_templates WHERE id = ?', parseInt(id));
   return NextResponse.json({ success: true });
 }

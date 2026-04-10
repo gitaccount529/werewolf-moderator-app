@@ -11,7 +11,7 @@ export async function POST(request: NextRequest, { params }: Params) {
   const body = await request.json();
   const { targetPlayerId } = body as { targetPlayerId: number };
 
-  const game = queryOne<Game>(
+  const game = await queryOne<Game>(
     'SELECT * FROM games WHERE code = ?',
     gameCode.toUpperCase(),
   );
@@ -20,7 +20,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: 'Game not found' }, { status: 404 });
   }
 
-  const result = resolveLynch(game.id, targetPlayerId, game.current_round);
+  const result = await resolveLynch(game.id, targetPlayerId, game.current_round);
 
   let chainDeaths: { playerId: number; playerName: string; cause: string; roleName?: string }[] = [];
   let pendingHunterKill = false;
@@ -29,7 +29,7 @@ export async function POST(request: NextRequest, { params }: Params) {
   let winReason: string | null = null;
 
   if (result.death) {
-    const chain = resolveDeathChain(game.id, [result.death], game.current_round);
+    const chain = await resolveDeathChain(game.id, [result.death], game.current_round);
     chainDeaths = chain.chainDeaths as typeof chainDeaths;
     pendingHunterKill = chain.pendingHunterKill;
   }
@@ -39,7 +39,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     winningTeam = 'tanner';
     winReason = 'The Tanner was lynched and wins the game!';
   } else {
-    const win = checkWinCondition(game.id);
+    const win = await checkWinCondition(game.id);
     if (win) {
       gameOver = true;
       winningTeam = win.team;

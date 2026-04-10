@@ -13,11 +13,11 @@ function generateCode(): string {
   return code;
 }
 
-export function createGameCode(): string {
+export async function createGameCode(): Promise<string> {
   // Loop until we find a code not already in use
   for (let attempts = 0; attempts < 100; attempts++) {
     const code = generateCode();
-    const existing = queryOne<{ id: number }>(
+    const existing = await queryOne<{ id: number }>(
       'SELECT id FROM games WHERE code = ?',
       code,
     );

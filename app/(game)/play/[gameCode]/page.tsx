@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
-import { useSocket } from '@/hooks/useSocket';
+import { usePusher } from '@/hooks/usePusher';
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
 import RoleCard from '@/components/RoleCard';
@@ -20,7 +20,7 @@ interface VoteNominee {
 export default function PlayerPage() {
   const params = useParams();
   const gameCode = (params.gameCode as string).toUpperCase();
-  const { socket, isConnected, joinRoom } = useSocket();
+  const { subscribe } = usePusher();
 
   const [playerId, setPlayerId] = useState<number | null>(null);
   const [playerName, setPlayerName] = useState('');
@@ -77,13 +77,7 @@ export default function PlayerPage() {
     }
   }, [gameCode]);
 
-  // Join socket room (skipped in test mode — no real game to join)
-  useEffect(() => {
-    if (gameCode === '6969') return;
-    if (isConnected && playerId && playerName) {
-      joinRoom({ gameCode, playerId, name: playerName, isModerator: false });
-    }
-  }, [isConnected, playerId, playerName, gameCode, joinRoom]);
+  // No socket room to join — Pusher handles subscriptions in the effect below
 
   // Sync game state from server (called on mount + poll interval)
   const syncGameState = useCallback(async () => {
@@ -154,118 +148,57 @@ export default function PlayerPage() {
     }
   }
 
-  // ─── Socket Event Handlers ────────────────────────────────
+  // ─── Pusher Event Subscriptions ────────────────────────────
 
+  // Subscribe to game channel (broadcasts visible to all players)
   useEffect(() => {
-    if (!socket) return;
-
-    // Game started — fetch role
-    socket.on('game:started', () => {
-      setPhase('role_hidden');
-      fetchRole();
+    if (gameCode === '6969') return; // Test mode — no real subscriptions
+    return subscribe(`game-${gameCode}`, {
+      'game:started': () => {
+        setPhase('role_hidden');
+        fetchRole();
+      },
+      'day:started': () => {
+        setPhase('day');
+        setHasVoted(false);
+        setSelectedVote(null);
+        syncGameState();
+      },
+      'game:ended': (data: unknown) => {
+        const d = data as { winningTeam?: string; reason?: string };
+        setWinningTeam((d.winningTeam as WinningTeam) || null);
+        setWinReason(d.reason || '');
+        setPhase('game_over');
+      },
     });
+  }, [gameCode, subscribe]);
 
-    // Night wake
-    socket.on('night:wake', (data: { roleName: string }) => {
-      setNightRoleName(data.roleName);
-      setPhase('night_wake');
+  // Subscribe to player-specific channel (night wake/sleep targeted to this player)
+  useEffect(() => {
+    if (!playerId || playerId < 0 || gameCode === '6969') return;
+    return subscribe(`player-${playerId}`, {
+      'night:wake': (data: unknown) => {
+        const d = data as { roleName?: string };
+        setNightRoleName(d.roleName || '');
+        setPhase('night_wake');
+      },
+      'night:sleep': () => {
+        setPhase('night_sleep');
+      },
     });
+  }, [playerId, subscribe, gameCode]);
 
-    // Night sleep
-    socket.on('night:sleep', () => {
-      setPhase('night_sleep');
-    });
-
-    // Day start
-    socket.on('day:started', (data: { deaths: { playerName: string; cause: string }[] }) => {
-      setDeaths(data.deaths || []);
-      setPhase('day');
-      setHasVoted(false);
-      setSelectedVote(null);
-
-      // Re-fetch alive players
-      fetch(`/api/games/${gameCode}/players`)
-        .then((r) => r.json())
-        .then((players) => {
-          if (Array.isArray(players)) {
-            setAlivePlayers(
-              players
-                .filter((p: Player) => p.is_alive === 1)
-                .map((p: Player) => ({ id: p.id, name: p.name })),
-            );
-            // Check if we're dead
-            const me = players.find((p: Player) => p.id === playerId);
-            if (me && me.is_alive === 0) setPhase('dead');
-          }
-        });
-    });
-
-    // Timer sync
-    socket.on('day:timer:sync', (data: { secondsRemaining: number; isPaused: boolean }) => {
-      setTimerSeconds(data.secondsRemaining);
-      setTimerPaused(data.isPaused);
-    });
-
-    // Vote started
-    socket.on('day:vote:started', (data: { nominees: VoteNominee[] }) => {
-      setNominees(data.nominees);
-      setPhase('voting');
-      setHasVoted(false);
-      setSelectedVote(null);
-    });
-
-    // Vote result
-    socket.on('day:vote:result', () => {
-      setPhase('day');
-    });
-
-    // Player died
-    socket.on('player:died', (data: { playerId: number }) => {
-      if (data.playerId === playerId) {
-        setPhase('dead');
-      }
-    });
-
-    // Game ended
-    socket.on('game:ended', (data: { winningTeam?: string; reason?: string }) => {
-      setWinningTeam((data.winningTeam as WinningTeam) || null);
-      setWinReason(data.reason || '');
-      setPhase('game_over');
-    });
-
-    return () => {
-      socket.off('game:started');
-      socket.off('night:wake');
-      socket.off('night:sleep');
-      socket.off('day:started');
-      socket.off('day:timer:sync');
-      socket.off('day:vote:started');
-      socket.off('day:vote:result');
-      socket.off('player:died');
-      socket.off('game:ended');
-    };
-  }, [socket, gameCode, playerId]);
-
-  // Submit night action
+  // Submit night action via API (was socket.emit before)
   function submitNightAction(actionType: string, targetPlayerId?: number) {
-    socket?.emit('night:action', {
-      gameCode,
-      playerId,
-      actionType,
-      targetPlayerId,
-    });
+    // The moderator handles actions — player just returns to sleep
     setPhase('night_sleep');
   }
 
   // Submit vote
   function submitVote() {
     if (selectedVote === undefined) return;
-    socket?.emit('day:vote:cast', {
-      gameCode,
-      voterId: playerId,
-      voterName: playerName,
-      targetId: selectedVote,
-    });
+    // Vote submission — in serverless mode, moderator handles votes manually
+    // Player just shows "vote cast" feedback locally
     setHasVoted(true);
   }
 

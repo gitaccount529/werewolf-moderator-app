@@ -9,7 +9,7 @@ type Params = { params: Promise<{ gameCode: string }> };
 export async function GET(_request: NextRequest, { params }: Params) {
   const { gameCode } = await params;
 
-  const game = queryOne<Game>(
+  const game = await queryOne<Game>(
     'SELECT * FROM games WHERE code = ?',
     gameCode.toUpperCase(),
   );
@@ -18,7 +18,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: 'Game not found' }, { status: 404 });
   }
 
-  const steps = getNightSteps(game.id, game.current_round);
+  const steps = await getNightSteps(game.id, game.current_round);
 
   // For each step, include player info with socket_ids for targeting
   const stepsWithPlayers = steps.map((step) => ({
@@ -43,7 +43,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
 export async function POST(_request: NextRequest, { params }: Params) {
   const { gameCode } = await params;
 
-  const game = queryOne<Game>(
+  const game = await queryOne<Game>(
     'SELECT * FROM games WHERE code = ?',
     gameCode.toUpperCase(),
   );
@@ -53,11 +53,11 @@ export async function POST(_request: NextRequest, { params }: Params) {
   }
 
   // Run night resolution
-  const result = resolveNight(game.id, game.current_round);
+  const result = await resolveNight(game.id, game.current_round);
 
   // Run death chain
   if (result.deaths.length > 0) {
-    const chain = resolveDeathChain(game.id, result.deaths, game.current_round);
+    const chain = await resolveDeathChain(game.id, result.deaths, game.current_round);
     result.chainDeaths = chain.chainDeaths;
     result.pendingHunterKill = result.pendingHunterKill || chain.pendingHunterKill;
   }

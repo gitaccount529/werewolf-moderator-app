@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { useSocket } from '@/hooks/useSocket';
+// Socket.IO replaced with Pusher — wake/sleep signals sent via API route
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
 import NightStep from '@/components/NightStep';
@@ -19,7 +19,14 @@ export default function NightPage() {
   const router = useRouter();
   const params = useParams();
   const gameCode = (params.gameCode as string).toUpperCase();
-  const { socket, isConnected, joinRoom } = useSocket();
+  // Helper: send wake/sleep signal to specific players via API
+  async function sendNightSignal(action: 'wake' | 'sleep', playerIds: number[], roleName?: string) {
+    await fetch(`/api/games/${gameCode}/night/signal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, playerIds, roleName }),
+    });
+  }
 
   const [round, setRound] = useState(0);
   const [steps, setSteps] = useState<StepData[]>([]);
@@ -38,12 +45,7 @@ export default function NightPage() {
   const [itemRecipient, setItemRecipient] = useState<number | null>(null);
   const [itemAssigned, setItemAssigned] = useState(false);
 
-  // Join socket room
-  useEffect(() => {
-    if (isConnected) {
-      joinRoom({ gameCode, name: 'Moderator', isModerator: true });
-    }
-  }, [isConnected, gameCode, joinRoom]);
+  // No socket room needed — Pusher broadcasts are server-side via API routes
 
   // Fetch night steps
   useEffect(() => {
@@ -115,15 +117,13 @@ export default function NightPage() {
         });
       }
 
-      // Send sleep signal to actors
-      const targetSocketIds = step.actors
-        .map((a) => a.socketId)
-        .filter(Boolean) as string[];
-      socket?.emit('night:sleep', { gameCode, targetSocketIds });
+      // Send sleep signal to actors via API
+      const actorIds = step.actors.map((a) => a.id);
+      sendNightSignal('sleep', actorIds);
 
       advanceStep();
     },
-    [currentStepIndex, steps, gameCode, round, socket],
+    [currentStepIndex, steps, gameCode, round],
   );
 
   function advanceStep() {
@@ -133,27 +133,18 @@ export default function NightPage() {
     } else {
       setCurrentStepIndex(nextIndex);
 
-      // Wake up next role's players
+      // Wake up next role's players via API
       const nextStep = steps[nextIndex];
-      const targetSocketIds = nextStep.actors
-        .map((a) => a.socketId)
-        .filter(Boolean) as string[];
+      const nextActorIds = nextStep.actors.map((a) => a.id);
 
-      socket?.emit('night:wake', {
-        gameCode,
-        targetSocketIds,
-        roleName: nextStep.role.name,
-      });
+      sendNightSignal('wake', nextActorIds, nextStep.role.name);
     }
   }
 
   function handleSkip() {
     const step = steps[currentStepIndex];
     if (step) {
-      const targetSocketIds = step.actors
-        .map((a) => a.socketId)
-        .filter(Boolean) as string[];
-      socket?.emit('night:sleep', { gameCode, targetSocketIds });
+      sendNightSignal('sleep', step.actors.map((a) => a.id));
     }
     advanceStep();
   }
@@ -162,17 +153,9 @@ export default function NightPage() {
   useEffect(() => {
     if (steps.length > 0 && !loading && currentStepIndex === 0) {
       const firstStep = steps[0];
-      const targetSocketIds = firstStep.actors
-        .map((a) => a.socketId)
-        .filter(Boolean) as string[];
-
-      socket?.emit('night:wake', {
-        gameCode,
-        targetSocketIds,
-        roleName: firstStep.role.name,
-      });
+      sendNightSignal('wake', firstStep.actors.map((a) => a.id), firstStep.role.name);
     }
-  }, [steps, loading, socket, gameCode, currentStepIndex]);
+  }, [steps, loading, gameCode, currentStepIndex]);
 
   async function handleResolveNight() {
     setResolving(true);
@@ -185,12 +168,7 @@ export default function NightPage() {
         const data: NightResolution = await res.json();
         setResolution(data);
 
-        // Broadcast day start
-        socket?.emit('day:start', {
-          gameCode,
-          deaths: [...data.deaths, ...data.chainDeaths],
-          announcements: data.announcements,
-        });
+        // Broadcast is now done by the API route when 'start_day' is called
       }
     } finally {
       setResolving(false);

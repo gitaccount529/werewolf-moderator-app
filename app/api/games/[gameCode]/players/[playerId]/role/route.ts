@@ -8,7 +8,7 @@ type Params = { params: Promise<{ gameCode: string; playerId: string }> };
 export async function GET(_request: NextRequest, { params }: Params) {
   const { gameCode, playerId } = await params;
 
-  const game = queryOne<Game>(
+  const game = await queryOne<Game>(
     'SELECT id FROM games WHERE code = ?',
     gameCode.toUpperCase(),
   );
@@ -17,7 +17,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: 'Game not found' }, { status: 404 });
   }
 
-  const playerRole = queryOne<Role & { player_id: number }>(
+  const playerRole = await queryOne<Role & { player_id: number }>(
     `SELECT r.*, pr.player_id
      FROM player_roles pr
      JOIN roles r ON r.id = pr.role_id
@@ -31,11 +31,11 @@ export async function GET(_request: NextRequest, { params }: Params) {
   }
 
   // Extra info based on role
-  let extraInfo: Record<string, unknown> = {};
+  const extraInfo: Record<string, unknown> = {};
 
   // Masons see each other
   if (playerRole.name === 'Mason') {
-    const otherMasons = queryAll<{ name: string }>(
+    const otherMasons = await queryAll<{ name: string }>(
       `SELECT p.name FROM player_roles pr
        JOIN players p ON p.id = pr.player_id
        JOIN roles r ON r.id = pr.role_id
@@ -48,7 +48,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
 
   // Minion sees werewolves
   if (playerRole.name === 'Minion') {
-    const wolves = queryAll<{ name: string }>(
+    const wolves = await queryAll<{ name: string }>(
       `SELECT p.name FROM player_roles pr
        JOIN players p ON p.id = pr.player_id
        JOIN roles r ON r.id = pr.role_id
@@ -60,7 +60,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
 
   // Werewolves see each other
   if (playerRole.team === 'werewolf' && playerRole.name !== 'Minion') {
-    const packMembers = queryAll<{ name: string }>(
+    const packMembers = await queryAll<{ name: string }>(
       `SELECT p.name FROM player_roles pr
        JOIN players p ON p.id = pr.player_id
        JOIN roles r ON r.id = pr.role_id
@@ -73,7 +73,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
 
   // Vampires see each other
   if (playerRole.team === 'vampire') {
-    const vampires = queryAll<{ name: string }>(
+    const vampires = await queryAll<{ name: string }>(
       `SELECT p.name FROM player_roles pr
        JOIN players p ON p.id = pr.player_id
        JOIN roles r ON r.id = pr.role_id

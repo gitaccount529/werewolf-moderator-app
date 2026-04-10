@@ -1,9 +1,9 @@
-import SocketProvider from '@/components/SocketProvider';
+import PusherProvider from '@/components/PusherProvider';
 
 export default function GameLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return <SocketProvider>{children}</SocketProvider>;
+  return <PusherProvider>{children}</PusherProvider>;
 }

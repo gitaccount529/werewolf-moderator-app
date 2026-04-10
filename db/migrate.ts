@@ -1,9 +1,18 @@
-import db from '../lib/db';
-import { ROLE_SEED } from '../lib/roles';
+// Load .env.local before importing modules that read process.env.
+// Next.js auto-loads env files at runtime, but standalone scripts run
+// via `tsx db/migrate.ts` don't get that treatment. Node 20.6+ provides
+// process.loadEnvFile() built-in.
+//
+// Static imports are hoisted, so we use dynamic imports inside main()
+// to guarantee env vars are loaded BEFORE lib/db.ts is evaluated.
+import { existsSync } from 'fs';
+import { resolve } from 'path';
+const envPath = resolve(process.cwd(), '.env.local');
+if (existsSync(envPath)) {
+  process.loadEnvFile(envPath);
+}
 
-console.log('[migrate] Creating tables...');
-
-db.exec(`
+const DDL = `
   CREATE TABLE IF NOT EXISTS games (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT NOT NULL UNIQUE,
@@ -98,52 +107,81 @@ db.exec(`
     roles_json TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
-`);
+`;
 
-// Add moderator_script_tl column if missing (for existing DBs)
-try {
-  db.exec('ALTER TABLE roles ADD COLUMN moderator_script_tl TEXT NOT NULL DEFAULT ""');
-  console.log('[migrate] Added moderator_script_tl column.');
-} catch {
-  // Column already exists
+async function main() {
+  // Dynamic import AFTER env vars are loaded — lib/db.ts throws on import
+  // if TURSO_DATABASE_URL is missing, so it must not be statically imported.
+  const { client, transaction } = await import('../lib/db');
+  const { ROLE_SEED } = await import('../lib/roles');
+
+  console.log('[migrate] Creating tables...');
+
+  // Split DDL into individual statements — libSQL's executeMultiple
+  // doesn't handle some edge cases, so we run them one by one.
+  const statements = DDL.split(';')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+
+  for (const stmt of statements) {
+    await client.execute(stmt);
+  }
+
+  // Backward-compat: add moderator_script_tl column if missing (for DBs
+  // migrated before Tagalog script support was added).
+  try {
+    await client.execute(
+      'ALTER TABLE roles ADD COLUMN moderator_script_tl TEXT NOT NULL DEFAULT ""',
+    );
+    console.log('[migrate] Added moderator_script_tl column.');
+  } catch {
+    // Column already exists — libSQL throws, we ignore.
+  }
+
+  console.log('[migrate] Tables created.');
+
+  // ─── Seed roles ─────────────────────────────────────────────
+  console.log(`[migrate] Seeding ${ROLE_SEED.length} roles...`);
+
+  const upsertSql = `
+    INSERT INTO roles (name, team, "set", night_wake_order, is_night_role, default_count, ability, moderator_script, moderator_script_tl)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(name) DO UPDATE SET
+      team = excluded.team,
+      "set" = excluded."set",
+      night_wake_order = excluded.night_wake_order,
+      is_night_role = excluded.is_night_role,
+      default_count = excluded.default_count,
+      ability = excluded.ability,
+      moderator_script = excluded.moderator_script,
+      moderator_script_tl = excluded.moderator_script_tl
+  `;
+
+  await transaction(async (tx) => {
+    for (const role of ROLE_SEED) {
+      await tx.execute({
+        sql: upsertSql,
+        args: [
+          role.name,
+          role.team,
+          role.set,
+          role.night_wake_order,
+          role.is_night_role,
+          role.default_count,
+          role.ability,
+          role.moderator_script,
+          role.moderator_script_tl,
+        ],
+      });
+    }
+  });
+
+  const result = await client.execute('SELECT COUNT(*) as count FROM roles');
+  const count = (result.rows[0] as unknown as { count: number }).count;
+  console.log(`[migrate] Done. ${count} roles in database.`);
 }
 
-console.log('[migrate] Tables created.');
-
-// ─── Seed roles ──────────────────────────────────────────────
-console.log(`[migrate] Seeding ${ROLE_SEED.length} roles...`);
-
-const upsertRole = db.prepare(`
-  INSERT INTO roles (name, team, "set", night_wake_order, is_night_role, default_count, ability, moderator_script, moderator_script_tl)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  ON CONFLICT(name) DO UPDATE SET
-    team = excluded.team,
-    "set" = excluded."set",
-    night_wake_order = excluded.night_wake_order,
-    is_night_role = excluded.is_night_role,
-    default_count = excluded.default_count,
-    ability = excluded.ability,
-    moderator_script = excluded.moderator_script,
-    moderator_script_tl = excluded.moderator_script_tl
-`);
-
-const seedAll = db.transaction(() => {
-  for (const role of ROLE_SEED) {
-    upsertRole.run(
-      role.name,
-      role.team,
-      role.set,
-      role.night_wake_order,
-      role.is_night_role,
-      role.default_count,
-      role.ability,
-      role.moderator_script,
-      role.moderator_script_tl,
-    );
-  }
+main().catch((err) => {
+  console.error('[migrate] Failed:', err);
+  process.exit(1);
 });
-
-seedAll();
-
-const count = db.prepare('SELECT COUNT(*) as count FROM roles').get() as { count: number };
-console.log(`[migrate] Done. ${count.count} roles in database.`);

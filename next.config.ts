@@ -1,7 +1,7 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ['better-sqlite3'],
+  // No serverExternalPackages needed — Turso and Pusher are pure JS/HTTP clients
 };
 
 export default nextConfig;

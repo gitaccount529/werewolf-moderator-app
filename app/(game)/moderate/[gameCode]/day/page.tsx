@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { useSocket } from '@/hooks/useSocket';
+// Real-time broadcasts are now handled by API routes (server-side Pusher)
+// Timer sync deferred — player polling handles phase transitions
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
 import Timer from '@/components/Timer';
@@ -27,7 +28,7 @@ export default function DayPage() {
   const router = useRouter();
   const params = useParams();
   const gameCode = (params.gameCode as string).toUpperCase();
-  const { socket, isConnected, joinRoom } = useSocket();
+  // No socket needed — phase transitions broadcast via API routes
 
   const [round, setRound] = useState(0);
   const [players, setPlayers] = useState<(Player & { role_name?: string; role_team?: string })[]>([]);
@@ -46,12 +47,7 @@ export default function DayPage() {
     winReason: string | null;
   } | null>(null);
 
-  // Join socket room
-  useEffect(() => {
-    if (isConnected) {
-      joinRoom({ gameCode, name: 'Moderator', isModerator: true });
-    }
-  }, [isConnected, gameCode, joinRoom]);
+  // No socket room join needed — broadcasts via API routes
 
   // Load game state
   useEffect(() => {
@@ -106,9 +102,9 @@ export default function DayPage() {
   // Timer sync
   const handleTimerSync = useCallback(
     (secondsRemaining: number, isPaused: boolean) => {
-      socket?.emit('day:timer:sync', { gameCode, secondsRemaining, isPaused });
+      // Timer sync deferred — player side uses polling to detect phase changes
     },
-    [socket, gameCode],
+    [gameCode],
   );
 
   // Nomination handlers
@@ -174,10 +170,7 @@ export default function DayPage() {
       });
       setPhase('result');
 
-      socket?.emit('day:vote:result', {
-        gameCode,
-        result: 'no_lynch',
-      });
+      // Vote result handled — player side uses polling for phase updates
       return;
     }
 
@@ -199,12 +192,7 @@ export default function DayPage() {
         setPlayers(await playersRes.json());
       }
 
-      socket?.emit('day:vote:result', {
-        gameCode,
-        result: data.death ? 'lynch' : 'no_lynch',
-        targetId: data.death?.playerId,
-        targetName: data.death?.playerName,
-      });
+      // Vote result handled — player side uses polling for phase updates
     }
   }
 

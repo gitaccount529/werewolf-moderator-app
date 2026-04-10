@@ -23,61 +23,58 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const code = createGameCode();
+  const code = await createGameCode();
   const pinHash = pin ? hashPin(pin) : '';
 
-  const newGameId = transaction(() => {
-    const result = run(
-      'INSERT INTO games (code, name, pin_hash) VALUES (?, ?, ?)',
-      code,
-      name,
-      pinHash,
-    );
-    const gameId = result.lastInsertRowid as number;
+  const newGameId = await transaction(async (tx) => {
+    const result = await tx.execute({
+      sql: 'INSERT INTO games (code, name, pin_hash) VALUES (?, ?, ?)',
+      args: [code, name, pinHash],
+    });
+    // libSQL returns lastInsertRowid as bigint — convert to number for JSON safety.
+    const gameId = Number(result.lastInsertRowid);
 
     // Store game mode in metadata
     if (gameMode) {
-      run(
-        `UPDATE games SET metadata_json = json_set(COALESCE(metadata_json, '{}'), '$.game_mode', ?) WHERE id = ?`,
-        gameMode,
-        gameId,
-      );
+      await tx.execute({
+        sql: `UPDATE games SET metadata_json = json_set(COALESCE(metadata_json, '{}'), '$.game_mode', ?) WHERE id = ?`,
+        args: [gameMode, gameId],
+      });
     }
 
     // Clone players and roles from an existing game
     if (copyFrom) {
-      const sourceGame = queryOne<Game>(
-        'SELECT id FROM games WHERE code = ?',
-        copyFrom.toUpperCase(),
-      );
+      const sourceRes = await tx.execute({
+        sql: 'SELECT id FROM games WHERE code = ?',
+        args: [copyFrom.toUpperCase()],
+      });
+      const sourceGame = sourceRes.rows[0] as unknown as Game | undefined;
 
       if (sourceGame) {
         // Copy players (names only, reset everything else)
-        const sourcePlayers = queryAll<Player>(
-          'SELECT name, seat_order FROM players WHERE game_id = ? ORDER BY seat_order',
-          sourceGame.id,
-        );
+        const playersRes = await tx.execute({
+          sql: 'SELECT name, seat_order FROM players WHERE game_id = ? ORDER BY seat_order',
+          args: [sourceGame.id],
+        });
+        const sourcePlayers = playersRes.rows as unknown as Player[];
         for (const p of sourcePlayers) {
-          run(
-            'INSERT INTO players (game_id, name, seat_order) VALUES (?, ?, ?)',
-            gameId,
-            p.name,
-            p.seat_order,
-          );
+          await tx.execute({
+            sql: 'INSERT INTO players (game_id, name, seat_order) VALUES (?, ?, ?)',
+            args: [gameId, p.name, p.seat_order],
+          });
         }
 
         // Copy role selections
-        const sourceRoles = queryAll<GameRole>(
-          'SELECT role_id, count FROM game_roles WHERE game_id = ?',
-          sourceGame.id,
-        );
+        const rolesRes = await tx.execute({
+          sql: 'SELECT role_id, count FROM game_roles WHERE game_id = ?',
+          args: [sourceGame.id],
+        });
+        const sourceRoles = rolesRes.rows as unknown as GameRole[];
         for (const r of sourceRoles) {
-          run(
-            'INSERT INTO game_roles (game_id, role_id, count) VALUES (?, ?, ?)',
-            gameId,
-            r.role_id,
-            r.count,
-          );
+          await tx.execute({
+            sql: 'INSERT INTO game_roles (game_id, role_id, count) VALUES (?, ?, ?)',
+            args: [gameId, r.role_id, r.count],
+          });
         }
       }
     }
@@ -103,7 +100,7 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const game = queryOne<Game>(
+  const game = await queryOne<Game>(
     'SELECT id, code, name, status, current_round, created_at FROM games WHERE code = ?',
     code.toUpperCase(),
   );

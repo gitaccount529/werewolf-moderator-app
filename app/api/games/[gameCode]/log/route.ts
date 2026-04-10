@@ -7,7 +7,7 @@ type Params = { params: Promise<{ gameCode: string }> };
 export async function GET(_request: NextRequest, { params }: Params) {
   const { gameCode } = await params;
 
-  const game = queryOne<Game>(
+  const game = await queryOne<Game>(
     'SELECT id FROM games WHERE code = ?',
     gameCode.toUpperCase(),
   );
@@ -16,7 +16,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: 'Game not found' }, { status: 404 });
   }
 
-  const entries = queryAll<GameLogEntry>(
+  const entries = await queryAll<GameLogEntry>(
     'SELECT * FROM game_log WHERE game_id = ? ORDER BY created_at ASC',
     game.id,
   );

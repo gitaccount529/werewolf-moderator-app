@@ -24,7 +24,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     );
   }
 
-  const game = queryOne<Game>(
+  const game = await queryOne<Game>(
     'SELECT id FROM games WHERE code = ?',
     gameCode.toUpperCase(),
   );
@@ -33,7 +33,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: 'Game not found' }, { status: 404 });
   }
 
-  const insertResult = run(
+  const insertResult = await run(
     `INSERT INTO night_actions (game_id, round, role_id, actor_player_id, target_player_id, action_type, result)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
     game.id,
@@ -46,7 +46,7 @@ export async function POST(request: NextRequest, { params }: Params) {
   );
 
   return NextResponse.json({
-    id: insertResult.lastInsertRowid,
+    id: Number(insertResult.lastInsertRowid),
     success: true,
   });
 }
@@ -56,7 +56,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   const { gameCode } = await params;
   const round = request.nextUrl.searchParams.get('round');
 
-  const game = queryOne<Game>(
+  const game = await queryOne<Game>(
     'SELECT id FROM games WHERE code = ?',
     gameCode.toUpperCase(),
   );
@@ -68,7 +68,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   let actions: NightAction[];
 
   if (round) {
-    actions = queryAll<NightAction>(
+    actions = await queryAll<NightAction>(
       `SELECT na.*, r.name as role_name, p.name as actor_name, tp.name as target_name
        FROM night_actions na
        JOIN roles r ON na.role_id = r.id
@@ -80,7 +80,7 @@ export async function GET(request: NextRequest, { params }: Params) {
       parseInt(round),
     );
   } else {
-    actions = queryAll<NightAction>(
+    actions = await queryAll<NightAction>(
       `SELECT na.*, r.name as role_name, p.name as actor_name, tp.name as target_name
        FROM night_actions na
        JOIN roles r ON na.role_id = r.id

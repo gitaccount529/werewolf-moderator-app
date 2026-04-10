@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useMemo } from 'react';
-import { useSocket } from '@/hooks/useSocket';
+import { usePusher } from '@/hooks/usePusher';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 
 interface PlayerInfo {
@@ -43,7 +43,7 @@ export default function PlayerList({
   onKick,
   onPlayerAdded,
 }: PlayerListProps) {
-  const { socket } = useSocket();
+  const { subscribe } = usePusher();
   const [players, setPlayers] = useState<PlayerInfo[]>([]);
   const [sortMode, setSortMode] = useState<SortMode>('join');
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
@@ -74,20 +74,13 @@ export default function PlayerList({
       });
   }
 
-  // Listen for real-time updates
+  // Listen for real-time updates via Pusher
   useEffect(() => {
-    if (!socket) return;
-
-    const handleUpdate = () => fetchPlayers();
-
-    socket.on('player:joined', handleUpdate);
-    socket.on('player:left', handleUpdate);
-
-    return () => {
-      socket.off('player:joined', handleUpdate);
-      socket.off('player:left', handleUpdate);
-    };
-  }, [socket, gameCode]);
+    return subscribe(`game-${gameCode}`, {
+      'player:joined': () => fetchPlayers(),
+      'player:left': () => fetchPlayers(),
+    });
+  }, [gameCode, subscribe]);
 
   // Manual add player
   async function handleAddPlayer() {
