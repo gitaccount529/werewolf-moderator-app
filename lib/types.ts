@@ -156,6 +156,8 @@ export interface PlayerEnrichment {
   sentinelShieldedIds: number[];
   /** Players holding an active (unused) sandwich item */
   sandwichHolderIds: number[];
+  /** True wolf/safe status for ALL alive players (moderator cheat sheet for Seer turn) */
+  seerTruth: Record<number, SeerResult>;
   /** Wolf kill target this round (for Witch to know who to save) */
   wolfKillTargetId: number | null;
   /** Wolf kill target name (for display) */
@@ -164,6 +166,7 @@ export interface PlayerEnrichment {
 
 export interface PlayerIndicator {
   seerResult?: SeerResult;
+  alreadyInvestigated?: boolean;  // true if seer checked this player in a prior round
   isProtected?: boolean;
   protectionLabel?: string;
 }

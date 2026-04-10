@@ -45,9 +45,17 @@ function buildIndicators(
   for (const p of players) {
     const ind: PlayerIndicator = {};
 
-    // Seer: show past investigation results
-    if (isSeerRole && enrichment.investigations[p.id]) {
-      ind.seerResult = enrichment.investigations[p.id].result;
+    // Seer: show wolf/safe truth for ALL players (moderator cheat sheet)
+    // Plus mark already-investigated players
+    if (isSeerRole) {
+      // Show truth from seerTruth (accounts for Lycan/Wolf Man deceptions)
+      if (enrichment.seerTruth?.[p.id]) {
+        ind.seerResult = enrichment.seerTruth[p.id];
+      }
+      // Mark if already investigated in a prior round
+      if (enrichment.investigations[p.id]) {
+        ind.alreadyInvestigated = true;
+      }
     }
 
     // Kill roles: show protection indicators
@@ -363,21 +371,26 @@ function PlayerGrid({
             onClick={() => onSelect(p.id)}
           >
             <div className="flex items-center justify-between w-full gap-2">
-              <span className="truncate">{p.name}</span>
+              <span className={`truncate ${ind?.alreadyInvestigated ? 'italic opacity-70' : ''}`}>
+                {p.name}
+              </span>
               <div className="flex items-center gap-1 shrink-0">
                 {ind?.seerResult === 'wolf' && (
                   <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
                     isSelected ? 'text-blood bg-blood/20' : 'text-blood-light'
                   }`}>
-                    WOLF
+                    🐺 WOLF
                   </span>
                 )}
                 {ind?.seerResult === 'safe' && (
                   <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
                     isSelected ? 'text-forest bg-forest/20' : 'text-forest-light'
                   }`}>
-                    SAFE
+                    ✅ SAFE
                   </span>
+                )}
+                {ind?.alreadyInvestigated && (
+                  <span className="text-[9px] text-moon-dim/50">checked</span>
                 )}
                 {ind?.isProtected && (
                   <span

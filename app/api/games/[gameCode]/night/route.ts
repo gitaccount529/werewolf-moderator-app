@@ -80,6 +80,28 @@ export async function GET(_request: NextRequest, { params }: Params) {
     .filter((i: { type: string; used: boolean }) => i.type === 'sandwich' && !i.used)
     .map((i: { holderPlayerId: number }) => i.holderPlayerId);
 
+  // ─── Enrichment: seer truth for ALL alive players ───────────
+  // The moderator sees wolf/safe labels on every player during the Seer's turn.
+  // Accounts for Lycan (village but appears wolf) and Wolf Man (wolf but appears safe).
+  const allPlayerRoles = await queryAll<{ player_id: number; role_name: string; team: string }>(
+    `SELECT pr.player_id, r.name as role_name, r.team
+     FROM player_roles pr
+     JOIN roles r ON r.id = pr.role_id
+     JOIN players p ON p.id = pr.player_id
+     WHERE pr.game_id = ? AND p.is_alive = 1`,
+    game.id,
+  );
+  const seerTruth: Record<number, 'wolf' | 'safe'> = {};
+  for (const pr of allPlayerRoles) {
+    if (pr.role_name === 'Lycan') {
+      seerTruth[pr.player_id] = 'wolf'; // Lycan appears as wolf to Seer
+    } else if (pr.role_name === 'Wolf Man') {
+      seerTruth[pr.player_id] = 'safe'; // Wolf Man appears as safe to Seer
+    } else {
+      seerTruth[pr.player_id] = pr.team === 'werewolf' ? 'wolf' : 'safe';
+    }
+  }
+
   // ─── Enrichment: wolf kill target this round (for Witch) ────
   const wolfKillAction = await queryOne<{ target_player_id: number }>(
     `SELECT target_player_id FROM night_actions
@@ -103,6 +125,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     priestBlessedIds,
     sentinelShieldedIds,
     sandwichHolderIds,
+    seerTruth,
     wolfKillTargetId,
     wolfKillTargetName,
   };
