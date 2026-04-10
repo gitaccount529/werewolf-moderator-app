@@ -1,15 +1,26 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Card from '@/components/ui/Card';
 
 type Mode = 'home' | 'create' | 'join';
 
+// Wrapper needed because useSearchParams requires Suspense in Next.js 15
 export default function Home() {
+  return (
+    <Suspense fallback={null}>
+      <HomeInner />
+    </Suspense>
+  );
+}
+
+function HomeInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const wasKicked = searchParams.get('kicked') === '1';
   const [mode, setMode] = useState<Mode>('home');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -96,9 +107,15 @@ export default function Home() {
         <h1 className="text-4xl font-bold text-gold mb-2 tracking-wide text-center">
           Ultimate Werewolf
         </h1>
-        <p className="text-moon-dim mb-12 text-lg text-center">
+        <p className="text-moon-dim mb-4 text-lg text-center">
           Moderator &amp; Player Companion
         </p>
+        {wasKicked && (
+          <div className="bg-blood/20 border border-blood/30 rounded-lg px-4 py-3 mb-8 max-w-xs text-center">
+            <p className="text-blood-light text-sm font-medium">You were removed from the game by the moderator.</p>
+          </div>
+        )}
+        {!wasKicked && <div className="mb-8" />}
         <div className="flex flex-col gap-4 w-full max-w-xs">
           <Button
             variant="primary"

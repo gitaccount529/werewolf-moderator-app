@@ -79,6 +79,7 @@ export default function PlayerList({
     return subscribe(`game-${gameCode}`, {
       'player:joined': () => fetchPlayers(),
       'player:left': () => fetchPlayers(),
+      'player:kicked': () => fetchPlayers(),
     });
   }, [gameCode, subscribe]);
 

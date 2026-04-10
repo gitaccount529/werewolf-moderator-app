@@ -111,7 +111,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
 
   await run('DELETE FROM players WHERE id = ? AND game_id = ?', playerId, game.id);
 
-  await broadcast(gameCode, 'player:left', { playerId });
+  await broadcast(gameCode, 'player:kicked', { playerId });
 
   return NextResponse.json({ success: true });
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { usePusher } from '@/hooks/usePusher';
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
@@ -18,6 +18,7 @@ interface VoteNominee {
 }
 
 export default function PlayerPage() {
+  const router = useRouter();
   const params = useParams();
   const gameCode = (params.gameCode as string).toUpperCase();
   const { subscribe } = usePusher();
@@ -175,6 +176,16 @@ export default function PlayerPage() {
         setHasVoted(false);
         setSelectedVote(null);
         syncGameState();
+      },
+      'player:kicked': (data: unknown) => {
+        const d = data as { playerId?: number };
+        if (d.playerId === playerId) {
+          // Clear session and redirect to home
+          sessionStorage.removeItem('playerId');
+          sessionStorage.removeItem('playerName');
+          sessionStorage.removeItem('gameCode');
+          router.push('/?kicked=1');
+        }
       },
       'game:ended': (data: unknown) => {
         const d = data as { winningTeam?: string; reason?: string };
