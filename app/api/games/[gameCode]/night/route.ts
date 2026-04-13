@@ -18,7 +18,11 @@ export async function GET(_request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: 'Game not found' }, { status: 404 });
   }
 
-  const steps = await getNightSteps(game.id, game.current_round);
+  const meta = JSON.parse(game.metadata_json || '{}');
+  // Reveal modes that require dead roles to still be called at night
+  const revealMode = meta.reveal_mode || (meta.no_role_reveal ? 'none' : 'full');
+  const callDeadRoles = revealMode === 'none' || revealMode === 'wolf_team_only';
+  const steps = await getNightSteps(game.id, game.current_round, callDeadRoles);
 
   const stepsWithPlayers = steps.map((step) => ({
     role: step.role,
@@ -29,6 +33,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     })),
     order: step.order,
     nightOneOnly: step.nightOneOnly,
+    isDead: step.isDead,
   }));
 
   // ─── Enrichment: past investigations ───────────────────────
@@ -87,7 +92,6 @@ export async function GET(_request: NextRequest, { params }: Params) {
   }
 
   // ─── Enrichment: metadata-based protections ────────────────
-  const meta = JSON.parse(game.metadata_json || '{}');
   const priestBlessedIds: number[] = meta.priest_blessed || [];
   const sandwichHolderIds: number[] = (meta.items || [])
     .filter((i: { type: string; used: boolean }) => i.type === 'sandwich' && !i.used)
@@ -143,6 +147,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
     seerTruth,
     wolfKillTargetId,
     wolfKillTargetName,
+    witchSaveUsed: !!meta.witch_save_used,
+    witchKillUsed: !!meta.witch_kill_used,
   };
 
   return NextResponse.json({
@@ -150,6 +156,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     steps: stepsWithPlayers,
     gameId: game.id,
     enrichment,
+    revealMode,
   });
 }
 

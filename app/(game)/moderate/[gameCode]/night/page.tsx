@@ -6,6 +6,9 @@ import { useRouter, useParams } from 'next/navigation';
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
 import NightStep from '@/components/NightStep';
+import RosterPanel from '@/components/RosterPanel';
+import GameLog from '@/components/GameLog';
+import GameSettingsPanel from '@/components/GameSettingsPanel';
 import type { Role, Player, NightResolution, PlayerEnrichment } from '@/lib/types';
 
 interface StepData {
@@ -13,6 +16,7 @@ interface StepData {
   actors: { id: number; name: string; socketId: string | null }[];
   order: number;
   nightOneOnly: boolean;
+  isDead?: boolean;
 }
 
 export default function NightPage() {
@@ -34,9 +38,9 @@ export default function NightPage() {
   const [alivePlayers, setAlivePlayers] = useState<{ id: number; name: string }[]>([]);
   const [lang] = useState<'en' | 'tl'>(() => {
     if (typeof window !== 'undefined') {
-      return (sessionStorage.getItem('lang') as 'en' | 'tl') || 'en';
+      return (sessionStorage.getItem('lang') as 'en' | 'tl') || 'tl';
     }
-    return 'en';
+    return 'tl';
   });
   const [loading, setLoading] = useState(true);
   const [resolving, setResolving] = useState(false);
@@ -46,6 +50,10 @@ export default function NightPage() {
   const [seerFlash, setSeerFlash] = useState<{ name: string; result: string } | null>(null);
   const [itemRecipient, setItemRecipient] = useState<number | null>(null);
   const [itemAssigned, setItemAssigned] = useState(false);
+  const [revealMode, setRevealMode] = useState<'full' | 'no_night' | 'wolf_team_only' | 'team_only' | 'none'>('full');
+  const [rosterOpen, setRosterOpen] = useState(false);
+  const [logOpen, setLogOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // No socket room needed — Pusher broadcasts are server-side via API routes
 
@@ -82,6 +90,13 @@ export default function NightPage() {
             .filter((p: Player) => p.is_alive === 1)
             .map((p: Player) => ({ id: p.id, name: p.name })),
         );
+
+        // Hydrate reveal mode
+        try {
+          const meta = JSON.parse(data.game.metadata_json || '{}');
+          if (meta.reveal_mode) setRevealMode(meta.reveal_mode);
+          else if (meta.no_role_reveal) setRevealMode('none');
+        } catch { /* ignore */ }
       }
     }
     load();
@@ -186,9 +201,29 @@ export default function NightPage() {
         } : prev);
       }
 
-      // Send sleep signal to actors via API
-      const actorIds = step.actors.map((a) => a.id);
-      sendNightSignal('sleep', actorIds);
+      // Track witch potion usage in metadata
+      if (action.actionType === 'witch_save') {
+        await fetch(`/api/games/${gameCode}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'update_metadata', metadata: { witch_save_used: true } }),
+        });
+        setEnrichment((prev) => prev ? { ...prev, witchSaveUsed: true } : prev);
+      }
+      if (action.actionType === 'witch_kill') {
+        await fetch(`/api/games/${gameCode}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'update_metadata', metadata: { witch_kill_used: true } }),
+        });
+        setEnrichment((prev) => prev ? { ...prev, witchKillUsed: true } : prev);
+      }
+
+      // Send sleep signal to actors via API (skip for dead roles)
+      if (!step.isDead) {
+        const actorIds = step.actors.map((a) => a.id);
+        sendNightSignal('sleep', actorIds);
+      }
 
       advanceStep();
     },
@@ -202,17 +237,18 @@ export default function NightPage() {
     } else {
       setCurrentStepIndex(nextIndex);
 
-      // Wake up next role's players via API
+      // Wake up next role's players via API (skip for dead roles)
       const nextStep = steps[nextIndex];
-      const nextActorIds = nextStep.actors.map((a) => a.id);
-
-      sendNightSignal('wake', nextActorIds, nextStep.role.name);
+      if (!nextStep.isDead) {
+        const nextActorIds = nextStep.actors.map((a) => a.id);
+        sendNightSignal('wake', nextActorIds, nextStep.role.name);
+      }
     }
   }
 
   function handleSkip() {
     const step = steps[currentStepIndex];
-    if (step) {
+    if (step && !step.isDead) {
       sendNightSignal('sleep', step.actors.map((a) => a.id));
     }
     advanceStep();
@@ -222,7 +258,9 @@ export default function NightPage() {
   useEffect(() => {
     if (steps.length > 0 && !loading && currentStepIndex === 0) {
       const firstStep = steps[0];
-      sendNightSignal('wake', firstStep.actors.map((a) => a.id), firstStep.role.name);
+      if (!firstStep.isDead) {
+        sendNightSignal('wake', firstStep.actors.map((a) => a.id), firstStep.role.name);
+      }
     }
   }, [steps, loading, gameCode, currentStepIndex]);
 
@@ -279,7 +317,15 @@ export default function NightPage() {
           </Card>
         ) : (
           <div className="space-y-3 mb-6">
-            {allDeaths.map((death) => (
+            {allDeaths.map((death) => {
+              // Format role display based on reveal mode
+              let roleDisplay = death.roleName || 'Unknown';
+              if (revealMode === 'none') roleDisplay = 'Role not revealed';
+              else if (revealMode === 'no_night') roleDisplay = 'Role not revealed (night)';
+              else if (revealMode === 'wolf_team_only') roleDisplay = death.roleTeam === 'werewolf' ? 'Werewolf' : 'Not a Werewolf';
+              else if (revealMode === 'team_only') roleDisplay = (death.roleTeam || 'unknown').charAt(0).toUpperCase() + (death.roleTeam || 'unknown').slice(1) + ' team';
+
+              return (
               <Card key={death.playerId} className="border-blood/30">
                 <div className="flex items-center justify-between">
                   <div>
@@ -287,13 +333,14 @@ export default function NightPage() {
                       {death.playerName}
                     </p>
                     <p className="text-sm text-moon-dim">
-                      {death.roleName} &mdash; Killed by: {death.cause}
+                      {roleDisplay} &mdash; Killed by: {death.cause}
                     </p>
                   </div>
                   <span className="text-2xl">💀</span>
                 </div>
               </Card>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -441,14 +488,19 @@ export default function NightPage() {
 
   return (
     <div className="min-h-screen p-4 md:p-6 max-w-2xl mx-auto">
-      {/* Progress */}
-      <div className="flex items-center justify-between mb-6">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4">
         <h1 className="text-lg font-bold text-gold">
           Night {round}
         </h1>
-        <span className="text-sm text-moon-dim">
-          Step {currentStepIndex + 1} of {steps.length}
-        </span>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setRosterOpen(true)} className="text-xs px-2.5 py-1.5 rounded-lg bg-charcoal text-moon-dim hover:text-moon hover:bg-charcoal-light transition-colors">Roster</button>
+          <button onClick={() => setLogOpen(true)} className="text-xs px-2.5 py-1.5 rounded-lg bg-charcoal text-moon-dim hover:text-moon hover:bg-charcoal-light transition-colors">Log</button>
+          <button onClick={() => setSettingsOpen(true)} className="text-xs px-2.5 py-1.5 rounded-lg bg-charcoal text-moon-dim hover:text-moon hover:bg-charcoal-light transition-colors">Settings</button>
+          <span className="text-sm text-moon-dim ml-1">
+            {currentStepIndex + 1}/{steps.length}
+          </span>
+        </div>
       </div>
 
       {/* Progress bar */}
@@ -485,7 +537,13 @@ export default function NightPage() {
         enrichment={enrichment}
         onAction={handleAction}
         onSkip={handleSkip}
+        isDead={currentStep.isDead}
       />
+
+      {/* Overlay panels */}
+      <RosterPanel gameCode={gameCode} isOpen={rosterOpen} onClose={() => setRosterOpen(false)} />
+      <GameLog gameCode={gameCode} isOpen={logOpen} onClose={() => setLogOpen(false)} />
+      <GameSettingsPanel gameCode={gameCode} isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }

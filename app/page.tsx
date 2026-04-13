@@ -134,6 +134,13 @@ function HomeInner() {
           <Button
             variant="ghost"
             className="w-full"
+            onClick={() => router.push('/guide')}
+          >
+            How to Play
+          </Button>
+          <Button
+            variant="ghost"
+            className="w-full"
             onClick={() => router.push('/roles')}
           >
             Role Library

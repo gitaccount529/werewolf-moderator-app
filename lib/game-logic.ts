@@ -8,19 +8,23 @@ export interface NightStepInfo {
   actors: Player[];
   order: number;
   nightOneOnly: boolean;
+  isDead: boolean;
 }
 
 // Roles that only wake on Night 1
 const NIGHT_ONE_ONLY = new Set(['Sentinel', 'Priest', 'Cupid', 'Doppelganger', 'Hoodlum', 'Beholder']);
 
-export async function getNightSteps(gameId: number, round: number): Promise<NightStepInfo[]> {
-  // Get all roles in this game that have night actions
+export async function getNightSteps(gameId: number, round: number, noRoleReveal = false): Promise<NightStepInfo[]> {
+  // When noRoleReveal is on, include ALL assigned night roles (even dead players)
+  // so the moderator still calls them out to hide information
+  const aliveFilter = noRoleReveal ? '' : 'AND p.is_alive = 1';
+
   const nightRoles = await queryAll<Role & { player_ids: string }>(
     `SELECT r.*, GROUP_CONCAT(p.id) as player_ids
      FROM game_roles gr
      JOIN roles r ON gr.role_id = r.id
      JOIN player_roles pr ON pr.role_id = r.id AND pr.game_id = gr.game_id
-     JOIN players p ON p.id = pr.player_id AND p.is_alive = 1
+     JOIN players p ON p.id = pr.player_id ${aliveFilter}
      WHERE gr.game_id = ? AND r.night_wake_order > 0
      GROUP BY r.id
      ORDER BY r.night_wake_order ASC`,
@@ -33,8 +37,8 @@ export async function getNightSteps(gameId: number, round: number): Promise<Nigh
     // Skip Night-1-only roles on subsequent nights
     if (NIGHT_ONE_ONLY.has(role.name) && round > 1) continue;
 
-    // Apprentice Seer only acts if Seer is dead
-    if (role.name === 'Apprentice Seer') {
+    // Apprentice Seer only acts if Seer is dead (unless noRoleReveal — still called but marked dead)
+    if (role.name === 'Apprentice Seer' && !noRoleReveal) {
       const seerAlive = await queryOne<{ id: number }>(
         `SELECT p.id FROM player_roles pr
          JOIN players p ON p.id = pr.player_id
@@ -45,12 +49,15 @@ export async function getNightSteps(gameId: number, round: number): Promise<Nigh
       if (seerAlive) continue; // Seer still alive, Apprentice doesn't wake
     }
 
-    // Get alive actors for this role
+    // Get actors for this role
     const playerIds = role.player_ids.split(',').map(Number);
     const actors = await queryAll<Player>(
-      `SELECT * FROM players WHERE id IN (${playerIds.map(() => '?').join(',')}) AND is_alive = 1`,
+      `SELECT * FROM players WHERE id IN (${playerIds.map(() => '?').join(',')})${noRoleReveal ? '' : ' AND is_alive = 1'}`,
       ...playerIds,
     );
+
+    // Check if all actors are dead
+    const allDead = actors.length > 0 && actors.every(a => a.is_alive === 0);
 
     if (actors.length > 0) {
       steps.push({
@@ -58,6 +65,7 @@ export async function getNightSteps(gameId: number, round: number): Promise<Nigh
         actors,
         order: role.night_wake_order,
         nightOneOnly: NIGHT_ONE_ONLY.has(role.name),
+        isDead: allDead,
       });
     }
   }
@@ -134,8 +142,8 @@ export async function resolveNight(gameId: number, round: number): Promise<Night
     }
 
     if (!protected_) {
-      const target = await queryOne<Player & { role_name: string }>(
-        `SELECT p.*, r.name as role_name FROM players p
+      const target = await queryOne<Player & { role_name: string; role_team: string }>(
+        `SELECT p.*, r.name as role_name, r.team as role_team FROM players p
          JOIN player_roles pr ON pr.player_id = p.id AND pr.game_id = ?
          JOIN roles r ON r.id = pr.role_id
          WHERE p.id = ?`,
@@ -171,6 +179,7 @@ export async function resolveNight(gameId: number, round: number): Promise<Night
             playerName: target.name,
             cause: 'werewolf',
             roleName: target.role_name,
+            roleTeam: target.role_team,
           });
 
           // Diseased effect
@@ -201,8 +210,8 @@ export async function resolveNight(gameId: number, round: number): Promise<Night
     if (sentinelShield?.target_player_id === targetId && round === 1) lwProtected = true;
 
     if (!lwProtected) {
-      const target = await queryOne<Player & { role_name: string }>(
-        `SELECT p.*, r.name as role_name FROM players p
+      const target = await queryOne<Player & { role_name: string; role_team: string }>(
+        `SELECT p.*, r.name as role_name, r.team as role_team FROM players p
          JOIN player_roles pr ON pr.player_id = p.id AND pr.game_id = ?
          JOIN roles r ON r.id = pr.role_id
          WHERE p.id = ?`,
@@ -216,6 +225,7 @@ export async function resolveNight(gameId: number, round: number): Promise<Night
           playerName: target.name,
           cause: 'werewolf',
           roleName: target.role_name,
+          roleTeam: target.role_team,
         });
       }
     }
@@ -223,8 +233,8 @@ export async function resolveNight(gameId: number, round: number): Promise<Night
 
   // Witch kill potion
   if (witchKill?.target_player_id) {
-    const target = await queryOne<Player & { role_name: string }>(
-      `SELECT p.*, r.name as role_name FROM players p
+    const target = await queryOne<Player & { role_name: string; role_team: string }>(
+      `SELECT p.*, r.name as role_name, r.team as role_team FROM players p
        JOIN player_roles pr ON pr.player_id = p.id AND pr.game_id = ?
        JOIN roles r ON r.id = pr.role_id
        WHERE p.id = ?`,
@@ -238,6 +248,7 @@ export async function resolveNight(gameId: number, round: number): Promise<Night
         playerName: target.name,
         cause: 'witch',
         roleName: target.role_name,
+        roleTeam: target.role_team,
       });
     }
   }
@@ -462,8 +473,8 @@ export async function resolveDeathChain(
       const neighbors = await getAliveNeighbors(death.playerId, gameId);
       for (const neighbor of neighbors) {
         if (!processed.has(neighbor.id)) {
-          const neighborRole = await queryOne<{ name: string }>(
-            `SELECT r.name FROM player_roles pr JOIN roles r ON r.id = pr.role_id
+          const neighborRole = await queryOne<{ name: string; team: string }>(
+            `SELECT r.name, r.team FROM player_roles pr JOIN roles r ON r.id = pr.role_id
              WHERE pr.player_id = ? AND pr.game_id = ?`,
             neighbor.id,
             gameId,
@@ -473,6 +484,7 @@ export async function resolveDeathChain(
             playerName: neighbor.name,
             cause: 'bomber',
             roleName: neighborRole?.name,
+            roleTeam: neighborRole?.team,
           };
           chainDeaths.push(nd);
           queue.push(nd);
@@ -493,8 +505,8 @@ export async function resolveDeathChain(
       if (partnerId && !processed.has(partnerId)) {
         const partner = await queryOne<Player>('SELECT * FROM players WHERE id = ? AND is_alive = 1', partnerId);
         if (partner) {
-          const partnerRole = await queryOne<{ name: string }>(
-            `SELECT r.name FROM player_roles pr JOIN roles r ON r.id = pr.role_id
+          const partnerRole = await queryOne<{ name: string; team: string }>(
+            `SELECT r.name, r.team FROM player_roles pr JOIN roles r ON r.id = pr.role_id
              WHERE pr.player_id = ? AND pr.game_id = ?`,
             partnerId,
             gameId,
@@ -504,6 +516,7 @@ export async function resolveDeathChain(
             playerName: partner.name,
             cause: 'heartbreak',
             roleName: partnerRole?.name,
+            roleTeam: partnerRole?.team,
           };
           chainDeaths.push(pd);
           queue.push(pd);
@@ -519,8 +532,8 @@ export async function resolveDeathChain(
     if (playerRole.role_name === 'Dire Wolf' && direWolfBond && !processed.has(direWolfBond)) {
       const bonded = await queryOne<Player>('SELECT * FROM players WHERE id = ? AND is_alive = 1', direWolfBond);
       if (bonded) {
-        const bondedRole = await queryOne<{ name: string }>(
-          `SELECT r.name FROM player_roles pr JOIN roles r ON r.id = pr.role_id
+        const bondedRole = await queryOne<{ name: string; team: string }>(
+          `SELECT r.name, r.team FROM player_roles pr JOIN roles r ON r.id = pr.role_id
            WHERE pr.player_id = ? AND pr.game_id = ?`,
           direWolfBond,
           gameId,
@@ -530,6 +543,7 @@ export async function resolveDeathChain(
           playerName: bonded.name,
           cause: 'dire_wolf',
           roleName: bondedRole?.name,
+          roleTeam: bondedRole?.team,
         };
         chainDeaths.push(bd);
         queue.push(bd);
@@ -662,6 +676,7 @@ export async function resolveLynch(
     playerName: target.name,
     cause: 'lynch',
     roleName: target.role_name,
+    roleTeam: target.role_team,
   };
 
   await run(

@@ -3,6 +3,8 @@ export type GameStatus = 'lobby' | 'night' | 'day' | 'ended';
 export type Team = 'village' | 'werewolf' | 'tanner' | 'vampire' | 'cult' | 'neutral';
 export type RoleSet = 'deluxe' | 'extreme';
 export type GameMode = 'classic' | 'one_night' | 'custom';
+export type RevealMode = 'full' | 'no_night' | 'wolf_team_only' | 'team_only' | 'none';
+export type VotingMode = 'standard' | 'closed_eyes' | 'big_brother' | 'elimination' | 'secret_ballot';
 export type ItemType = 'ivory_tower' | 'charm' | 'sandwich' | 'gavel';
 export type DeathCause =
   | 'werewolf'
@@ -118,6 +120,21 @@ export interface NightStep {
   actors: Player[];
   order: number;
   nightOneOnly: boolean;
+  isDead?: boolean;
+}
+
+// ─── Rule Variations ────────────────────────────────────────
+export interface RuleVariations {
+  reveal_mode?: RevealMode;
+  voting_mode?: VotingMode;
+  speed_mode?: boolean;
+  muted_dead?: boolean;
+  mayor_election?: boolean;
+  mayor_player_id?: number | null;
+  variable_roles?: boolean;
+  // Legacy compat
+  no_role_reveal?: boolean;
+  closed_eyes_voting?: boolean;
 }
 
 export interface DeathRecord {
@@ -125,6 +142,7 @@ export interface DeathRecord {
   playerName: string;
   cause: DeathCause;
   roleName?: string;
+  roleTeam?: string;
 }
 
 export interface NightResolution {
@@ -166,6 +184,10 @@ export interface PlayerEnrichment {
   wolfKillTargetId: number | null;
   /** Wolf kill target name (for display) */
   wolfKillTargetName: string | null;
+  /** Whether witch has already used her save potion this game */
+  witchSaveUsed: boolean;
+  /** Whether witch has already used her kill potion this game */
+  witchKillUsed: boolean;
 }
 
 export interface PlayerIndicator {

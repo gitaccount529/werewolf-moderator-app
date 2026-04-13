@@ -5,6 +5,8 @@ import type { GameLogEntry } from '@/lib/types';
 
 interface GameLogProps {
   gameCode: string;
+  isOpen: boolean;
+  onClose: () => void;
 }
 
 const eventIcons: Record<string, string> = {
@@ -19,10 +21,9 @@ const eventIcons: Record<string, string> = {
   vote: '🗳️',
 };
 
-export default function GameLog({ gameCode }: GameLogProps) {
+export default function GameLog({ gameCode, isOpen, onClose }: GameLogProps) {
   const [entries, setEntries] = useState<GameLogEntry[]>([]);
   const [filterRound, setFilterRound] = useState<number | null>(null);
-  const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -39,68 +40,70 @@ export default function GameLog({ gameCode }: GameLogProps) {
     ? entries.filter((e) => e.round === filterRound)
     : entries;
 
+  if (!isOpen) return null;
+
   return (
-    <div className="fixed right-0 top-0 h-full z-50" role="complementary" aria-label="Game Log">
-      {/* Toggle button */}
-      <button
-        className="absolute top-4 right-4 bg-charcoal-light border border-moon-dim/20 rounded-lg px-3 py-2 text-sm text-moon-dim hover:text-moon z-10"
-        onClick={() => setIsOpen(!isOpen)}
-        aria-expanded={isOpen}
-        aria-controls="game-log-panel"
-      >
-        {isOpen ? 'Close' : 'Game Log'}
-      </button>
-
-      {/* Panel — sidebar on desktop, bottom sheet on mobile */}
-      {isOpen && (
-        <div
-          id="game-log-panel"
-          className="fixed md:relative md:w-80 md:h-full
-                     inset-x-0 bottom-0 md:inset-auto md:bottom-auto
-                     max-h-[70vh] md:max-h-full
-                     bg-charcoal-dark border-t md:border-t-0 md:border-l border-moon-dim/10
-                     p-4 pt-4 md:pt-14 overflow-y-auto rounded-t-2xl md:rounded-none"
-        >
-          <h3 className="text-lg font-semibold text-gold mb-4">Game Log</h3>
-
-          {/* Round filter */}
-          <div className="flex gap-1 mb-4 flex-wrap">
-            <button
-              className={`text-xs px-2 py-1 rounded ${filterRound === null ? 'bg-gold text-charcoal-dark' : 'bg-charcoal text-moon-dim'}`}
-              onClick={() => setFilterRound(null)}
-            >
-              All
-            </button>
-            {rounds.map((r) => (
-              <button
-                key={r}
-                className={`text-xs px-2 py-1 rounded ${filterRound === r ? 'bg-gold text-charcoal-dark' : 'bg-charcoal text-moon-dim'}`}
-                onClick={() => setFilterRound(r)}
-              >
-                R{r}
-              </button>
-            ))}
-          </div>
-
-          {/* Entries */}
-          <div className="space-y-2">
-            {filtered.map((entry) => (
-              <div
-                key={entry.id}
-                className="bg-charcoal/50 rounded-lg px-3 py-2 text-sm"
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <span>{eventIcons[entry.event_type] || '📝'}</span>
-                  <span className="text-xs text-moon-dim">
-                    R{entry.round} {entry.phase}
-                  </span>
-                </div>
-                <p className="text-moon text-sm">{entry.description}</p>
-              </div>
-            ))}
-          </div>
+    <div className="fixed top-0 left-0 w-dvw h-dvh z-[100] bg-charcoal-dark flex flex-col">
+      {/* Header */}
+      <div className="flex items-center justify-between p-4 border-b border-moon-dim/10">
+        <div>
+          <h2 className="text-xl font-bold text-gold">Game Log</h2>
+          <p className="text-xs text-moon-dim mt-0.5">
+            {entries.length} event{entries.length !== 1 ? 's' : ''} across {rounds.length} round{rounds.length !== 1 ? 's' : ''}
+          </p>
         </div>
-      )}
+        <button
+          onClick={onClose}
+          className="w-10 h-10 flex items-center justify-center rounded-lg bg-charcoal hover:bg-charcoal-light text-moon-dim hover:text-moon transition-colors text-xl"
+        >
+          &times;
+        </button>
+      </div>
+
+      {/* Round filter */}
+      <div className="flex gap-1.5 px-4 py-3 flex-wrap border-b border-moon-dim/5">
+        <button
+          className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${
+            filterRound === null ? 'bg-gold text-charcoal-dark' : 'bg-charcoal text-moon-dim hover:text-moon'
+          }`}
+          onClick={() => setFilterRound(null)}
+        >
+          All
+        </button>
+        {rounds.map((r) => (
+          <button
+            key={r}
+            className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${
+              filterRound === r ? 'bg-gold text-charcoal-dark' : 'bg-charcoal text-moon-dim hover:text-moon'
+            }`}
+            onClick={() => setFilterRound(r)}
+          >
+            Round {r}
+          </button>
+        ))}
+      </div>
+
+      {/* Entries */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-2">
+        {filtered.length === 0 ? (
+          <p className="text-moon-dim text-center mt-8">No events recorded yet.</p>
+        ) : (
+          filtered.map((entry) => (
+            <div
+              key={entry.id}
+              className="bg-charcoal-light/50 rounded-lg px-4 py-3 border border-moon-dim/5"
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-lg">{eventIcons[entry.event_type] || '📝'}</span>
+                <span className="text-xs text-moon-dim font-medium">
+                  Round {entry.round} &middot; {entry.phase}
+                </span>
+              </div>
+              <p className="text-moon text-sm">{entry.description}</p>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 }

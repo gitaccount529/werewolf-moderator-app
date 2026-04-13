@@ -23,6 +23,8 @@ interface VotePanelProps {
   onRecordVote: (voterId: number, targetId: number | null) => void;
   onFinishVoting: () => void;
   votes: Vote[];
+  votingMode?: 'standard' | 'closed_eyes' | 'big_brother' | 'elimination' | 'secret_ballot';
+  mayorPlayerId?: number | null;
 }
 
 export default function VotePanel({
@@ -33,15 +35,18 @@ export default function VotePanel({
   onRecordVote,
   onFinishVoting,
   votes,
+  votingMode = 'standard',
+  mayorPlayerId = null,
 }: VotePanelProps) {
   const [nominateTarget, setNominateTarget] = useState<number | null>(null);
   const [votingActive, setVotingActive] = useState(false);
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
 
-  // Count votes per nominee
+  // Count votes per nominee (mayor's vote counts double)
   const voteCounts = new Map<number | null, number>();
   for (const v of votes) {
-    voteCounts.set(v.targetId, (voteCounts.get(v.targetId) ?? 0) + 1);
+    const weight = (mayorPlayerId && v.voterId === mayorPlayerId) ? 2 : 1;
+    voteCounts.set(v.targetId, (voteCounts.get(v.targetId) ?? 0) + weight);
   }
 
   const majority = Math.floor(alivePlayers.length / 2) + 1;
@@ -49,12 +54,46 @@ export default function VotePanel({
     (p) => !nominees.find((n) => n.playerId === p.id),
   );
 
+  const maxNominees = votingMode === 'big_brother' ? 2 : Infinity;
+  const nomineesFull = nominees.length >= maxNominees;
+
   return (
     <div className="space-y-6">
+      {/* Voting mode instruction */}
+      {votingMode === 'elimination' && !votingActive && (
+        <div className="bg-gold/10 border border-gold/30 rounded-xl p-4">
+          <p className="text-sm font-semibold text-gold">Process of Elimination</p>
+          <p className="text-xs text-moon-dim mt-1">
+            One player declares another player safe. That safe player then declares another safe, and so on.
+            The last player with their hand up is eliminated. Run this verbally, then record the result below.
+          </p>
+        </div>
+      )}
+      {votingMode === 'secret_ballot' && !votingActive && (
+        <div className="bg-gold/10 border border-gold/30 rounded-xl p-4">
+          <p className="text-sm font-semibold text-gold">Secret Ballot</p>
+          <p className="text-xs text-moon-dim mt-1">
+            Each player writes a name on paper. Collect and read ballots aloud, then record votes below.
+            If tied, hold a re-vote among the tied players only. Second tie = all tied players eliminated.
+          </p>
+        </div>
+      )}
+      {votingMode === 'big_brother' && !votingActive && (
+        <div className="bg-gold/10 border border-gold/30 rounded-xl p-4">
+          <p className="text-sm font-semibold text-gold">Big Brother (Two Player Accusations)</p>
+          <p className="text-xs text-moon-dim mt-1">
+            The first 2 players accused and seconded are nominated. Players vote thumbs up (first) or
+            thumbs down (second). If tied, both are eliminated.
+          </p>
+        </div>
+      )}
+
       {/* Nomination phase */}
       {!votingActive && (
         <div>
-          <h3 className="text-lg font-semibold text-moon mb-3">Nominations</h3>
+          <h3 className="text-lg font-semibold text-moon mb-3">
+            Nominations{votingMode === 'big_brother' ? ' (max 2)' : ''}
+          </h3>
 
           {/* Current nominees */}
           {nominees.length > 0 && (
@@ -77,7 +116,7 @@ export default function VotePanel({
           )}
 
           {/* Add nominee */}
-          {nonNominees.length > 0 && (
+          {nonNominees.length > 0 && !nomineesFull && (
             <div className="grid grid-cols-2 gap-2 mb-4">
               {nonNominees.map((p) => (
                 <button
@@ -118,6 +157,26 @@ export default function VotePanel({
             Voting (Majority: {majority})
           </h3>
 
+          {/* Voting mode instructions */}
+          {votingMode === 'closed_eyes' && (
+            <div className="bg-gold/10 border border-gold/30 rounded-xl p-4 mb-4 text-center">
+              <p className="text-lg font-semibold text-gold">Close Your Eyes!</p>
+              <p className="text-xs text-moon-dim mt-1">
+                Instruct all players to close their eyes. Call each nominee&apos;s name and ask for raised hands.
+              </p>
+            </div>
+          )}
+          {votingMode === 'big_brother' && (
+            <div className="bg-gold/10 border border-gold/30 rounded-xl p-3 mb-4 text-center">
+              <p className="text-xs text-gold">Thumbs UP = {nominees[0]?.playerName || '1st'} &nbsp;|&nbsp; Thumbs DOWN = {nominees[1]?.playerName || '2nd'}. Tie = both eliminated.</p>
+            </div>
+          )}
+          {votingMode === 'secret_ballot' && (
+            <div className="bg-gold/10 border border-gold/30 rounded-xl p-3 mb-4 text-center">
+              <p className="text-xs text-gold">Record ballot results below. Tie = re-vote among tied only.</p>
+            </div>
+          )}
+
           {/* Vote tallies */}
           <div className="space-y-3 mb-4">
             {nominees.map((n) => {
@@ -156,7 +215,9 @@ export default function VotePanel({
               const existingVote = votes.find((v) => v.voterId === voter.id);
               return (
                 <div key={voter.id} className="flex items-center gap-2">
-                  <span className="text-sm text-moon w-24 truncate">{voter.name}:</span>
+                  <span className="text-sm text-moon w-24 truncate">
+                    {voter.name}{mayorPlayerId === voter.id ? ' \u{1F451}2x' : ''}:
+                  </span>
                   <select
                     className="flex-1 bg-charcoal-dark text-moon rounded-lg px-3 py-2 text-sm min-h-[36px]"
                     value={existingVote?.targetId ?? ''}

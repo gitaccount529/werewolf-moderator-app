@@ -24,6 +24,7 @@ interface NightStepProps {
   enrichment?: PlayerEnrichment | null;
   onAction: (action: { targetPlayerId?: number; actionType: string; secondTargetId?: number }) => void;
   onSkip: () => void;
+  isDead?: boolean;
 }
 
 // ─── Indicator Builder ───────────────────────────────────────
@@ -91,6 +92,7 @@ export default function NightStep({
   enrichment,
   onAction,
   onSkip,
+  isDead = false,
 }: NightStepProps) {
   const [selectedTarget, setSelectedTarget] = useState<number | null>(null);
   const [secondTarget, setSecondTarget] = useState<number | null>(null);
@@ -191,10 +193,17 @@ export default function NightStep({
     <div className="space-y-6">
       {/* Role header */}
       <div className="text-center">
-        <h2 className="text-3xl font-bold text-gold mb-2">{role.name}</h2>
+        <div className="flex items-center justify-center gap-3 mb-2">
+          <h2 className="text-3xl font-bold text-gold">{role.name}</h2>
+          {isDead && (
+            <span className="bg-blood/30 text-blood-light text-xs font-bold px-2.5 py-1 rounded-full uppercase tracking-wider">
+              Dead
+            </span>
+          )}
+        </div>
         <div className="flex justify-center gap-2 text-sm text-moon-dim mb-4">
           {actors.map((a) => (
-            <span key={a.id} className="bg-charcoal rounded-full px-3 py-1">
+            <span key={a.id} className={`rounded-full px-3 py-1 ${isDead ? 'bg-charcoal-dark line-through opacity-60' : 'bg-charcoal'}`}>
               {a.name}
             </span>
           ))}
@@ -219,7 +228,16 @@ export default function NightStep({
       })()}
 
       {/* Action area */}
-      {isGeneric ? (
+      {isDead ? (
+        <div className="text-center space-y-4">
+          <div className="bg-blood/10 border border-blood/20 rounded-xl p-4">
+            <p className="text-sm text-moon-dim">
+              This role is dead. Read the script aloud for appearances only.
+            </p>
+          </div>
+          <Button onClick={onSkip} className="w-full">Continue</Button>
+        </div>
+      ) : isGeneric ? (
         <div className="text-center">
           <p className="text-moon-dim mb-4">
             {role.name} is awake. Perform their action, then continue.
@@ -241,30 +259,42 @@ export default function NightStep({
           )}
 
           {/* Witch save */}
-          <div className="bg-charcoal rounded-lg p-4">
-            <label className="flex items-center gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={witchSave}
-                onChange={(e) => setWitchSave(e.target.checked)}
-                className="w-5 h-5 rounded accent-gold"
-              />
-              <span className="text-moon">
-                Use healing potion{enrichment?.wolfKillTargetName ? ` (save ${enrichment.wolfKillTargetName})` : ' (save the victim)'}?
-              </span>
-            </label>
-          </div>
+          {enrichment?.witchSaveUsed ? (
+            <div className="bg-charcoal rounded-lg p-4 opacity-50">
+              <p className="text-moon-dim text-sm">Healing potion already used this game.</p>
+            </div>
+          ) : (
+            <div className="bg-charcoal rounded-lg p-4">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={witchSave}
+                  onChange={(e) => setWitchSave(e.target.checked)}
+                  className="w-5 h-5 rounded accent-gold"
+                />
+                <span className="text-moon">
+                  Use healing potion{enrichment?.wolfKillTargetName ? ` (save ${enrichment.wolfKillTargetName})` : ' (save the victim)'}?
+                </span>
+              </label>
+            </div>
+          )}
 
           {/* Witch kill */}
-          <div>
-            <p className="text-sm text-moon-dim mb-2">Use poison potion on:</p>
-            <PlayerGrid
-              players={nonActorPlayers}
-              selected={witchKillTarget}
-              onSelect={setWitchKillTarget}
-              indicators={indicators}
-            />
-          </div>
+          {enrichment?.witchKillUsed ? (
+            <div className="bg-charcoal rounded-lg p-4 opacity-50">
+              <p className="text-moon-dim text-sm">Poison potion already used this game.</p>
+            </div>
+          ) : (
+            <div>
+              <p className="text-sm text-moon-dim mb-2">Use poison potion on:</p>
+              <PlayerGrid
+                players={nonActorPlayers}
+                selected={witchKillTarget}
+                onSelect={setWitchKillTarget}
+                indicators={indicators}
+              />
+            </div>
+          )}
 
           <Button onClick={handleSubmit} className="w-full">
             Confirm Witch Actions

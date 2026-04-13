@@ -37,9 +37,9 @@ export default function SetupPage() {
   const [showConnect, setShowConnect] = useState(false);
   const [lang, setLang] = useState<'en' | 'tl'>(() => {
     if (typeof window !== 'undefined') {
-      return (sessionStorage.getItem('lang') as 'en' | 'tl') || 'en';
+      return (sessionStorage.getItem('lang') as 'en' | 'tl') || 'tl';
     }
-    return 'en';
+    return 'tl';
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -56,7 +56,15 @@ export default function SetupPage() {
   // Difficulty + Items
   type Difficulty = 'easy' | 'medium' | 'hard';
   const [difficulty, setDifficulty] = useState<Difficulty>('medium');
-  const [itemsEnabled, setItemsEnabled] = useState(false);
+  const [itemsEnabled, setItemsEnabled] = useState(true);
+
+  // Rule Variations
+  const [revealMode, setRevealMode] = useState<'full' | 'no_night' | 'wolf_team_only' | 'team_only' | 'none'>('none');
+  const [votingMode, setVotingMode] = useState<'standard' | 'closed_eyes' | 'big_brother' | 'elimination' | 'secret_ballot'>('standard');
+  const [speedMode, setSpeedMode] = useState(false);
+  const [mutedDead, setMutedDead] = useState(true);
+  const [mayorElection, setMayorElection] = useState(false);
+  const [variableRoles, setVariableRoles] = useState(false);
 
   // Subscribe to game channel for real-time updates
   useEffect(() => {
@@ -88,10 +96,20 @@ export default function SetupPage() {
         setGameName(gameData.game.name);
         setPlayers(gameData.players);
 
-        // Hydrate items toggle from saved metadata
+        // Hydrate settings from saved metadata
         try {
           const meta = JSON.parse(gameData.game.metadata_json || '{}');
           if (meta.items_enabled) setItemsEnabled(true);
+          // Reveal mode (with legacy compat)
+          if (meta.reveal_mode) setRevealMode(meta.reveal_mode);
+          else if (meta.no_role_reveal) setRevealMode('none');
+          // Voting mode (with legacy compat)
+          if (meta.voting_mode) setVotingMode(meta.voting_mode);
+          else if (meta.closed_eyes_voting) setVotingMode('closed_eyes');
+          if (meta.speed_mode) setSpeedMode(true);
+          if (meta.muted_dead) setMutedDead(true);
+          if (meta.mayor_election) setMayorElection(true);
+          if (meta.variable_roles) setVariableRoles(true);
         } catch { /* ignore parse errors */ }
 
         if (gameData.game.status !== 'lobby') {
@@ -588,7 +606,7 @@ export default function SetupPage() {
               </p>
             </div>
             <button
-              className={`relative w-12 h-6 rounded-full transition-colors ${
+              className={`relative w-12 h-6 rounded-full transition-colors shrink-0 ${
                 itemsEnabled ? 'bg-gold' : 'bg-charcoal-dark'
               }`}
               onClick={() => {
@@ -601,10 +619,138 @@ export default function SetupPage() {
                 });
               }}
             >
-              <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${
-                itemsEnabled ? 'translate-x-6' : 'translate-x-0.5'
+              <span className={`absolute left-0.5 top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${
+                itemsEnabled ? 'translate-x-[24px]' : 'translate-x-0'
               }`} />
             </button>
+          </div>
+        </Card>
+      )}
+
+      {/* Rule Variations */}
+      {rolesMatch && players.length >= 3 && (
+        <Card className="mt-6">
+          <h3 className="text-lg font-semibold text-moon mb-1">Rule Variations</h3>
+          <p className="text-xs text-moon-dim mb-5">Official variants from the Ultimate Werewolf rulebook</p>
+          <div className="space-y-6">
+
+            {/* Role Revealing */}
+            <div>
+              <p className="text-sm font-medium text-moon mb-1">Role Revealing</p>
+              <p className="text-xs text-moon-dim mb-2">What is revealed when a player is eliminated</p>
+              <div className="flex flex-wrap gap-1.5">
+                {([
+                  { value: 'full', label: 'Full Reveal' },
+                  { value: 'no_night', label: 'No Night Reveal' },
+                  { value: 'wolf_team_only', label: 'Wolf Only' },
+                  { value: 'team_only', label: 'Team Only' },
+                  { value: 'none', label: 'No Reveal' },
+                ] as const).map((opt) => (
+                  <button
+                    key={opt.value}
+                    className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${
+                      revealMode === opt.value
+                        ? 'bg-gold text-charcoal-dark'
+                        : 'bg-charcoal-dark text-moon-dim hover:text-moon'
+                    }`}
+                    onClick={() => {
+                      setRevealMode(opt.value);
+                      fetch(`/api/games/${gameCode}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'update_metadata', metadata: { reveal_mode: opt.value } }),
+                      });
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              {revealMode !== 'full' && (
+                <p className="text-xs text-gold-dark mt-2">
+                  {revealMode === 'no_night' && 'Day kills reveal role. Night kills do not.'}
+                  {revealMode === 'wolf_team_only' && 'Only reveal if the player was a wolf or not. Dead roles still called at night.'}
+                  {revealMode === 'team_only' && 'Reveal team (Wolf, Village, Vampire, etc.) but not specific role.'}
+                  {revealMode === 'none' && 'Nothing revealed. Dead roles still called at night to hide information.'}
+                </p>
+              )}
+            </div>
+
+            {/* Voting Mode */}
+            <div>
+              <p className="text-sm font-medium text-moon mb-1">Voting Mode</p>
+              <p className="text-xs text-moon-dim mb-2">How nominations and votes are handled</p>
+              <div className="flex flex-wrap gap-1.5">
+                {([
+                  { value: 'standard', label: 'Standard' },
+                  { value: 'closed_eyes', label: 'Closed Eyes' },
+                  { value: 'big_brother', label: 'Big Brother' },
+                  { value: 'elimination', label: 'Elimination' },
+                  { value: 'secret_ballot', label: 'Secret Ballot' },
+                ] as const).map((opt) => (
+                  <button
+                    key={opt.value}
+                    className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${
+                      votingMode === opt.value
+                        ? 'bg-gold text-charcoal-dark'
+                        : 'bg-charcoal-dark text-moon-dim hover:text-moon'
+                    }`}
+                    onClick={() => {
+                      setVotingMode(opt.value);
+                      fetch(`/api/games/${gameCode}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'update_metadata', metadata: { voting_mode: opt.value } }),
+                      });
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              {votingMode !== 'standard' && (
+                <p className="text-xs text-gold-dark mt-2">
+                  {votingMode === 'closed_eyes' && 'Players close their eyes during the vote. Moderator calls names and counts hands.'}
+                  {votingMode === 'big_brother' && 'First 2 accused are voted on (thumbs up/down). Tie = both eliminated.'}
+                  {votingMode === 'elimination' && 'Players declare others safe in a chain. Last player standing is eliminated.'}
+                  {votingMode === 'secret_ballot' && 'Players write names on paper. Most votes eliminated. Tie = re-vote among tied.'}
+                </p>
+              )}
+            </div>
+
+            {/* Toggle variations */}
+            {([
+              { key: 'speed_mode', label: 'Speed Mode', desc: 'Shorter discussion timer (2 min instead of 5)', value: speedMode, setter: setSpeedMode },
+              { key: 'muted_dead', label: 'Muted Dead', desc: 'Dead players cannot speak during discussion', value: mutedDead, setter: setMutedDead },
+              { key: 'mayor_election', label: 'Mayor Election', desc: "First day includes mayor election — mayor's vote counts double", value: mayorElection, setter: setMayorElection },
+              { key: 'variable_roles', label: 'Variable Roles', desc: 'Mix extra roles with villagers and discard some — uncertainty about which roles are in play', value: variableRoles, setter: setVariableRoles },
+            ] as const).map((v) => (
+              <div key={v.key} className="flex items-center justify-between">
+                <div className="pr-4">
+                  <p className="text-sm font-medium text-moon">{v.label}</p>
+                  <p className="text-xs text-moon-dim">{v.desc}</p>
+                </div>
+                <button
+                  className={`relative w-12 h-6 rounded-full transition-colors shrink-0 ${
+                    v.value ? 'bg-gold' : 'bg-charcoal-dark'
+                  }`}
+                  onClick={() => {
+                    const newVal = !v.value;
+                    v.setter(newVal);
+                    fetch(`/api/games/${gameCode}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ action: 'update_metadata', metadata: { [v.key]: newVal } }),
+                    });
+                  }}
+                >
+                  <span className={`absolute left-0.5 top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${
+                    v.value ? 'translate-x-[24px]' : 'translate-x-0'
+                  }`} />
+                </button>
+              </div>
+            ))}
+
           </div>
         </Card>
       )}

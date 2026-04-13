@@ -9,6 +9,7 @@ interface TimerProps {
   decreasePerRound?: number; // seconds to subtract each round
   onComplete?: () => void;
   onSync?: (secondsRemaining: number, isPaused: boolean) => void;
+  speedMode?: boolean;
 }
 
 export default function Timer({
@@ -17,9 +18,12 @@ export default function Timer({
   decreasePerRound = 30,
   onComplete,
   onSync,
+  speedMode = false,
 }: TimerProps) {
+  // Speed mode: 2 minutes base instead of 5
+  const baseSeconds = speedMode ? 120 : initialSeconds;
   // Auto-decrease timer each round: Day 1 = full, Day 2 = -30s, etc.
-  const roundAdjusted = Math.max(60, initialSeconds - (round - 1) * decreasePerRound);
+  const roundAdjusted = Math.max(60, baseSeconds - (round - 1) * decreasePerRound);
   const [customDuration, setCustomDuration] = useState(roundAdjusted);
   const [seconds, setSeconds] = useState(roundAdjusted);
   const [isPaused, setIsPaused] = useState(true);
@@ -28,11 +32,12 @@ export default function Timer({
 
   // Update when round changes
   useEffect(() => {
-    const adjusted = Math.max(60, initialSeconds - (round - 1) * decreasePerRound);
+    const base = speedMode ? 120 : initialSeconds;
+    const adjusted = Math.max(60, base - (round - 1) * decreasePerRound);
     setCustomDuration(adjusted);
     setSeconds(adjusted);
     setIsPaused(true);
-  }, [round, initialSeconds, decreasePerRound]);
+  }, [round, initialSeconds, decreasePerRound, speedMode]);
 
   const clearTimer = useCallback(() => {
     if (intervalRef.current) {

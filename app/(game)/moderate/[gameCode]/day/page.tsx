@@ -9,9 +9,11 @@ import Card from '@/components/ui/Card';
 import Timer from '@/components/Timer';
 import VotePanel from '@/components/VotePanel';
 import GameLog from '@/components/GameLog';
+import RosterPanel from '@/components/RosterPanel';
+import GameSettingsPanel from '@/components/GameSettingsPanel';
 import type { Player, DeathRecord } from '@/lib/types';
 
-type DayPhase = 'summary' | 'discussion' | 'voting' | 'result';
+type DayPhase = 'summary' | 'mayor_election' | 'discussion' | 'voting' | 'result';
 
 interface Nominee {
   playerId: number;
@@ -47,6 +49,19 @@ export default function DayPage() {
     winReason: string | null;
   } | null>(null);
 
+  // Rule Variations
+  const [speedMode, setSpeedMode] = useState(false);
+  const [mutedDead, setMutedDead] = useState(false);
+  const [votingMode, setVotingMode] = useState<'standard' | 'closed_eyes' | 'big_brother' | 'elimination' | 'secret_ballot'>('standard');
+  const [revealMode, setRevealMode] = useState<'full' | 'no_night' | 'wolf_team_only' | 'team_only' | 'none'>('full');
+  const [mayorElection, setMayorElection] = useState(false);
+  const [mayorPlayerId, setMayorPlayerId] = useState<number | null>(null);
+  const [mayorNominees, setMayorNominees] = useState<Nominee[]>([]);
+  const [mayorVotes, setMayorVotes] = useState<Vote[]>([]);
+  const [rosterOpen, setRosterOpen] = useState(false);
+  const [logOpen, setLogOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
   // No socket room join needed — broadcasts via API routes
 
   // Load game state
@@ -74,6 +89,21 @@ export default function DayPage() {
       });
 
       setPlayers(data.players);
+
+      // Hydrate rule variations from metadata
+      try {
+        const meta = JSON.parse(data.game.metadata_json || '{}');
+        if (meta.speed_mode) setSpeedMode(true);
+        if (meta.muted_dead) setMutedDead(true);
+        // Voting mode (with legacy compat)
+        if (meta.voting_mode) setVotingMode(meta.voting_mode);
+        else if (meta.closed_eyes_voting) setVotingMode('closed_eyes');
+        // Reveal mode (with legacy compat)
+        if (meta.reveal_mode) setRevealMode(meta.reveal_mode);
+        else if (meta.no_role_reveal) setRevealMode('none');
+        if (meta.mayor_election) setMayorElection(true);
+        if (meta.mayor_player_id) setMayorPlayerId(meta.mayor_player_id);
+      } catch { /* ignore */ }
 
       // Load recent deaths from game log
       const logRes = await fetch(`/api/games/${gameCode}/log`);
@@ -136,10 +166,11 @@ export default function DayPage() {
 
   // Finish voting and tally
   async function finishVoting() {
-    // Count votes
+    // Count votes (mayor's vote counts double)
     const voteCounts = new Map<number | null, number>();
     for (const v of votes) {
-      voteCounts.set(v.targetId, (voteCounts.get(v.targetId) ?? 0) + 1);
+      const weight = (mayorPlayerId && v.voterId === mayorPlayerId) ? 2 : 1;
+      voteCounts.set(v.targetId, (voteCounts.get(v.targetId) ?? 0) + weight);
     }
 
     // Find the target with most votes
@@ -156,6 +187,41 @@ export default function DayPage() {
     }
 
     const majority = Math.floor(alivePlayers.length / 2) + 1;
+
+    // Big Brother: tie = both eliminated (execute both via sequential lynch calls)
+    if (votingMode === 'big_brother' && targets.length === 2 && targets[0] !== null && targets[1] !== null) {
+      // Execute first lynch
+      const res1 = await fetch(`/api/games/${gameCode}/lynch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetPlayerId: targets[0] }),
+      });
+      const data1 = res1.ok ? await res1.json() : null;
+
+      // Execute second lynch
+      const res2 = await fetch(`/api/games/${gameCode}/lynch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetPlayerId: targets[1] }),
+      });
+      const data2 = res2.ok ? await res2.json() : null;
+
+      // Combine results
+      const allChainDeaths = [...(data1?.chainDeaths || []), ...(data2?.chainDeaths || [])];
+      setLynchResult({
+        death: data1?.death || data2?.death || null,
+        princeRevealed: data1?.princeRevealed || data2?.princeRevealed || false,
+        tannerWin: data1?.tannerWin || data2?.tannerWin || false,
+        chainDeaths: allChainDeaths,
+        gameOver: data2?.gameOver || data1?.gameOver || false,
+        winningTeam: data2?.winningTeam || data1?.winningTeam || null,
+        winReason: data2?.winReason || data1?.winReason || null,
+      });
+      setPhase('result');
+      const playersRes = await fetch(`/api/games/${gameCode}/players`);
+      if (playersRes.ok) setPlayers(await playersRes.json());
+      return;
+    }
 
     // Tie or no majority — no lynch
     if (targets.length !== 1 || targets[0] === null || maxVotes < majority) {
@@ -209,6 +275,24 @@ export default function DayPage() {
     }
   }
 
+  // Format role display based on reveal mode and death context
+  function formatRoleReveal(death: DeathRecord, isNightKill: boolean): string {
+    const mode = revealMode;
+    if (mode === 'full') return death.roleName || 'Unknown';
+    if (mode === 'none') return 'Role not revealed';
+    if (mode === 'no_night') {
+      return isNightKill ? 'Role not revealed' : (death.roleName || 'Unknown');
+    }
+    if (mode === 'wolf_team_only') {
+      return death.roleTeam === 'werewolf' ? 'Werewolf' : 'Not a Werewolf';
+    }
+    if (mode === 'team_only') {
+      const team = death.roleTeam || 'unknown';
+      return team.charAt(0).toUpperCase() + team.slice(1) + ' team';
+    }
+    return death.roleName || 'Unknown';
+  }
+
   const alivePlayers = players.filter((p) => p.is_alive === 1);
   const deadPlayers = players.filter((p) => p.is_alive === 0);
 
@@ -219,12 +303,15 @@ export default function DayPage() {
         <h1 className="text-2xl font-bold text-gold">
           Day {round}
         </h1>
-        <span className="text-sm text-moon-dim capitalize">
-          {phase}
-        </span>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setRosterOpen(true)} className="text-xs px-2.5 py-1.5 rounded-lg bg-charcoal text-moon-dim hover:text-moon hover:bg-charcoal-light transition-colors">Roster</button>
+          <button onClick={() => setLogOpen(true)} className="text-xs px-2.5 py-1.5 rounded-lg bg-charcoal text-moon-dim hover:text-moon hover:bg-charcoal-light transition-colors">Log</button>
+          <button onClick={() => setSettingsOpen(true)} className="text-xs px-2.5 py-1.5 rounded-lg bg-charcoal text-moon-dim hover:text-moon hover:bg-charcoal-light transition-colors">Settings</button>
+          <span className="text-sm text-moon-dim capitalize ml-1">
+            {phase}
+          </span>
+        </div>
       </div>
-
-      <GameLog gameCode={gameCode} />
 
       {/* Summary phase */}
       {phase === 'summary' && (
@@ -259,16 +346,159 @@ export default function DayPage() {
           <Button
             variant="primary"
             className="w-full"
-            onClick={() => setPhase('discussion')}
+            onClick={() => {
+              if (mayorElection && round === 1 && !mayorPlayerId) {
+                setPhase('mayor_election');
+              } else {
+                setPhase('discussion');
+              }
+            }}
           >
-            Begin Discussion
+            {mayorElection && round === 1 && !mayorPlayerId ? 'Begin Mayor Election' : 'Begin Discussion'}
           </Button>
+        </div>
+      )}
+
+      {/* Mayor Election phase (first day only) */}
+      {phase === 'mayor_election' && (
+        <div className="space-y-6">
+          <Card>
+            <h3 className="text-lg font-semibold text-gold mb-3">Mayor Election</h3>
+            <p className="text-sm text-moon-dim mb-4">
+              Nominate candidates for mayor. The elected mayor&apos;s vote will count double during day voting.
+            </p>
+
+            {/* Mayor nominees */}
+            {mayorNominees.length > 0 && (
+              <div className="space-y-2 mb-4">
+                {mayorNominees.map((n) => (
+                  <div key={n.playerId} className="flex items-center justify-between bg-charcoal rounded-lg px-4 py-2.5">
+                    <span className="text-moon font-medium">{n.playerName}</span>
+                    <button
+                      className="text-xs text-blood-light hover:text-blood"
+                      onClick={() => setMayorNominees(mayorNominees.filter((mn) => mn.playerId !== n.playerId))}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Add nominee grid */}
+            <div className="grid grid-cols-2 gap-2 mb-4">
+              {alivePlayers
+                .filter((p) => !mayorNominees.find((n) => n.playerId === p.id))
+                .map((p) => (
+                  <button
+                    key={p.id}
+                    className="min-h-[44px] px-4 py-2.5 rounded-lg text-left bg-charcoal hover:bg-charcoal-light text-moon transition-all"
+                    onClick={() => setMayorNominees([...mayorNominees, { playerId: p.id, playerName: p.name }])}
+                  >
+                    {p.name}
+                  </button>
+                ))}
+            </div>
+
+            {/* Mayor vote recording */}
+            {mayorNominees.length >= 2 && (
+              <>
+                <h4 className="text-sm text-moon-dim mb-2">Record mayor votes:</h4>
+                <div className="space-y-2 mb-4 max-h-[200px] overflow-y-auto">
+                  {alivePlayers.map((voter) => {
+                    const existingVote = mayorVotes.find((v) => v.voterId === voter.id);
+                    return (
+                      <div key={voter.id} className="flex items-center gap-2">
+                        <span className="text-sm text-moon w-24 truncate">{voter.name}:</span>
+                        <select
+                          className="flex-1 bg-charcoal-dark text-moon rounded-lg px-3 py-2 text-sm min-h-[36px]"
+                          value={existingVote?.targetId ?? ''}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            const targetId = val === '' ? null : parseInt(val);
+                            setMayorVotes((prev) => {
+                              const idx = prev.findIndex((v) => v.voterId === voter.id);
+                              const newVote: Vote = { voterId: voter.id, voterName: voter.name, targetId };
+                              if (idx >= 0) { const u = [...prev]; u[idx] = newVote; return u; }
+                              return [...prev, newVote];
+                            });
+                          }}
+                        >
+                          <option value="">—</option>
+                          {mayorNominees.map((n) => (
+                            <option key={n.playerId} value={n.playerId}>{n.playerName}</option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <Button
+                  variant="primary"
+                  className="w-full"
+                  onClick={async () => {
+                    // Tally mayor votes
+                    const counts = new Map<number, number>();
+                    for (const v of mayorVotes) {
+                      if (v.targetId !== null) {
+                        counts.set(v.targetId, (counts.get(v.targetId) ?? 0) + 1);
+                      }
+                    }
+                    let winner: number | null = null;
+                    let maxCount = 0;
+                    let tied = false;
+                    for (const [id, count] of counts) {
+                      if (count > maxCount) { maxCount = count; winner = id; tied = false; }
+                      else if (count === maxCount) { tied = true; }
+                    }
+                    if (tied || !winner) {
+                      // Tie — pick first nominee with most votes as tiebreaker
+                      winner = mayorNominees[0]?.playerId ?? null;
+                    }
+                    if (winner) {
+                      setMayorPlayerId(winner);
+                      await fetch(`/api/games/${gameCode}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'update_metadata', metadata: { mayor_player_id: winner } }),
+                      });
+                    }
+                    setPhase('discussion');
+                  }}
+                >
+                  Elect Mayor &amp; Begin Discussion
+                </Button>
+              </>
+            )}
+
+            {mayorNominees.length < 2 && (
+              <p className="text-xs text-moon-dim text-center">Nominate at least 2 candidates to begin voting.</p>
+            )}
+          </Card>
         </div>
       )}
 
       {/* Discussion phase */}
       {phase === 'discussion' && (
         <div className="space-y-6">
+          {/* Muted Dead reminder */}
+          {mutedDead && deadPlayers.length > 0 && (
+            <div className="bg-gold/10 border border-gold/30 rounded-xl p-3">
+              <p className="text-sm text-gold font-medium">Muted Dead: Dead players cannot speak during discussion.</p>
+            </div>
+          )}
+
+          {/* Mayor badge */}
+          {mayorPlayerId && (
+            <div className="bg-gold/10 border border-gold/30 rounded-xl p-3 flex items-center gap-2">
+              <span className="text-lg">{'\u{1F451}'}</span>
+              <p className="text-sm text-gold font-medium">
+                Mayor: {players.find((p) => p.id === mayorPlayerId)?.name ?? 'Unknown'} (vote counts double)
+              </p>
+            </div>
+          )}
+
           {/* Player status */}
           <Card>
             <h3 className="text-lg font-semibold text-moon mb-3">
@@ -311,6 +541,7 @@ export default function DayPage() {
               round={round}
               decreasePerRound={30}
               onSync={handleTimerSync}
+              speedMode={speedMode}
             />
           </Card>
 
@@ -335,6 +566,8 @@ export default function DayPage() {
             onRecordVote={recordVote}
             onFinishVoting={finishVoting}
             votes={votes}
+            votingMode={votingMode}
+            mayorPlayerId={mayorPlayerId}
           />
         </Card>
       )}
@@ -358,7 +591,7 @@ export default function DayPage() {
                   {lynchResult.death.playerName} was lynched
                 </h3>
                 <p className="text-moon-dim mt-2">
-                  Role: {lynchResult.death.roleName}
+                  Role: {formatRoleReveal(lynchResult.death, false)}
                 </p>
               </div>
             ) : (
@@ -380,7 +613,7 @@ export default function DayPage() {
                   <span>💀</span>
                   <div>
                     <p className="text-blood-light font-medium">{d.playerName}</p>
-                    <p className="text-xs text-moon-dim">{d.roleName} — {d.cause}</p>
+                    <p className="text-xs text-moon-dim">{formatRoleReveal(d, false)} — {d.cause}</p>
                   </div>
                 </div>
               ))}
@@ -423,6 +656,11 @@ export default function DayPage() {
 
       {/* Bottom spacer */}
       <div className="h-8" />
+
+      {/* Overlay panels */}
+      <RosterPanel gameCode={gameCode} isOpen={rosterOpen} onClose={() => setRosterOpen(false)} />
+      <GameLog gameCode={gameCode} isOpen={logOpen} onClose={() => setLogOpen(false)} />
+      <GameSettingsPanel gameCode={gameCode} isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }

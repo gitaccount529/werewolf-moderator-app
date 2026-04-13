@@ -76,6 +76,34 @@ export async function POST(request: NextRequest) {
             args: [gameId, r.role_id, r.count],
           });
         }
+
+        // Copy game settings from metadata (strip runtime state)
+        const metaRes = await tx.execute({
+          sql: 'SELECT metadata_json FROM games WHERE id = ?',
+          args: [sourceGame.id],
+        });
+        const sourceMeta = metaRes.rows[0] as unknown as { metadata_json: string } | undefined;
+        if (sourceMeta?.metadata_json) {
+          try {
+            const oldMeta = JSON.parse(sourceMeta.metadata_json);
+            const settingKeys = [
+              'game_mode', 'items_enabled', 'reveal_mode', 'voting_mode',
+              'speed_mode', 'muted_dead', 'mayor_election', 'variable_roles',
+              // Legacy compat
+              'no_role_reveal', 'closed_eyes_voting',
+            ];
+            const newMeta: Record<string, unknown> = {};
+            for (const key of settingKeys) {
+              if (oldMeta[key] !== undefined) newMeta[key] = oldMeta[key];
+            }
+            if (Object.keys(newMeta).length > 0) {
+              await tx.execute({
+                sql: 'UPDATE games SET metadata_json = ? WHERE id = ?',
+                args: [JSON.stringify(newMeta), gameId],
+              });
+            }
+          } catch { /* ignore parse errors */ }
+        }
       }
     }
 
