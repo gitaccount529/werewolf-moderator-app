@@ -188,6 +188,8 @@ export interface PlayerEnrichment {
   witchSaveUsed: boolean;
   /** Whether witch has already used her kill potion this game */
   witchKillUsed: boolean;
+  /** Name of the alive player holding the Seer role (for Beholder's turn) */
+  seerPlayerName: string | null;
 }
 
 export interface PlayerIndicator {

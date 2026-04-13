@@ -136,6 +136,15 @@ export async function GET(_request: NextRequest, { params }: Params) {
     wolfKillTargetName = targetPlayer?.name ?? null;
   }
 
+  // ─── Enrichment: Seer identity (for Beholder's turn) ─────────
+  const seerPlayerRow = await queryOne<{ name: string }>(
+    `SELECT p.name FROM players p
+     JOIN player_roles pr ON pr.player_id = p.id
+     JOIN roles r ON r.id = pr.role_id
+     WHERE pr.game_id = ? AND r.name = 'Seer' AND p.is_alive = 1`,
+    game.id,
+  );
+
   const enrichment: PlayerEnrichment = {
     investigations,
     seerChecked,
@@ -149,6 +158,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     wolfKillTargetName,
     witchSaveUsed: !!meta.witch_save_used,
     witchKillUsed: !!meta.witch_kill_used,
+    seerPlayerName: seerPlayerRow?.name ?? null,
   };
 
   return NextResponse.json({

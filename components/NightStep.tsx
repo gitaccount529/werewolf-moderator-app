@@ -187,6 +187,7 @@ export default function NightStep({
 
   const needsTwoTargets = ['Cupid', 'Leprechaun'].includes(role.name);
   const isWitch = role.name === 'Witch';
+  const isBeholder = role.name === 'Beholder';
   const isGeneric = ['Thing (That Goes Bump in the Night)', 'Insomniac', 'Tough Guy', 'Fruit Brute'].includes(role.name);
 
   return (
@@ -235,6 +236,22 @@ export default function NightStep({
               This role is dead. Read the script aloud for appearances only.
             </p>
           </div>
+          <Button onClick={onSkip} className="w-full">Continue</Button>
+        </div>
+      ) : isBeholder ? (
+        <div className="space-y-4">
+          {enrichment?.seerPlayerName ? (
+            <div className="bg-amber-900/30 border border-amber-500/60 rounded-xl p-5 text-center">
+              <p className="text-xs text-amber-400 uppercase tracking-wider font-semibold mb-2">
+                Point to the Seer
+              </p>
+              <p className="text-3xl font-bold text-amber-300">{enrichment.seerPlayerName}</p>
+            </div>
+          ) : (
+            <div className="bg-charcoal rounded-xl p-4 text-center">
+              <p className="text-sm text-moon-dim">No Seer found in this game.</p>
+            </div>
+          )}
           <Button onClick={onSkip} className="w-full">Continue</Button>
         </div>
       ) : isGeneric ? (
